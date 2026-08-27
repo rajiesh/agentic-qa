@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Todo App</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>Todo List</h1>
+      <p class="subtitle">Stay organised, get things done.</p>
+    </header>
+
+    <section class="add-section">
+      <form id="add-form">
+        <input
+          id="new-title"
+          type="text"
+          placeholder="What needs to be done?"
+          maxlength="255"
+          required
+          autocomplete="off"
+        />
+        <input
+          id="new-description"
+          type="text"
+          placeholder="Description (optional)"
+          maxlength="500"
+          autocomplete="off"
+        />
+        <button type="submit">Add</button>
+      </form>
+    </section>
+
+    <section class="filters">
+      <button class="filter-btn active" data-filter="all">All</button>
+      <button class="filter-btn" data-filter="active">Active</button>
+      <button class="filter-btn" data-filter="completed">Completed</button>
+    </section>
+
+    <section id="todo-list" class="todo-list">
+      <div class="loading">Loading…</div>
+    </section>
+
+    <footer id="footer" class="footer hidden">
+      <span id="count"></span>
+      <button id="clear-completed" class="clear-btn">Clear completed</button>
+    </footer>
+
+    <div id="toast" class="toast hidden"></div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
