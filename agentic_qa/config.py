@@ -26,6 +26,7 @@ class SpecialistConfig(BaseModel):
     integration: TestTypeConfig = Field(default_factory=lambda: TestTypeConfig(enabled=False))
     api: TestTypeConfig = Field(default_factory=lambda: TestTypeConfig(enabled=False))
     e2e: TestTypeConfig = Field(default_factory=TestTypeConfig)  # enabled by default; Strategist gates it
+    contract: TestTypeConfig = Field(default_factory=TestTypeConfig)  # enabled by default; PlatformStrategist gates it
 
 
 class QAConfig(BaseSettings):
@@ -37,6 +38,7 @@ class QAConfig(BaseSettings):
     max_tokens_specialist: int = 16384
     output_dir: str = "outputs"
     max_repo_size_mb: int = 500
-    run_generated_tests: bool = False
+    run_generated_tests: bool = False   # reserved: run generated tests after generation
+    lint_generated: bool = True         # run ruff/eslint on generated files after each specialist
     concurrency_limit: int = 3
     specialists: SpecialistConfig = Field(default_factory=SpecialistConfig)

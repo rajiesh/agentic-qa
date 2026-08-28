@@ -23,6 +23,9 @@ dependencies = [
 agentic-qa = "agentic_qa.cli:app"
 
 [project.optional-dependencies]
+contract = [
+    "pact-python>=2.2",           # consumer-driven contract testing
+]
 dev = [
     "pytest>=8.2",
     "pytest-asyncio>=0.23",

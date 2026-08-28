@@ -18,6 +18,7 @@ from .config import QAConfig, RepoTarget
 from .core.models import QARun, SpecialistResult, TestType
 from .core.output_manager import OutputManager
 from .core.repo_ingestor import RepoIngestor
+from .core.validator import PostGenerationValidator
 
 logger = logging.getLogger(__name__)
 
@@ -133,11 +134,18 @@ class QAOrchestrator:
             return_exceptions=True,
         )
 
-        qa_run.specialist_results = [
-            r for r in results if isinstance(r, SpecialistResult)
-        ]
+        validator = PostGenerationValidator()
+        for item in results:
+            if isinstance(item, SpecialistResult):
+                validator.validate(item, str(output_manager.root), self.config.lint_generated)
+                qa_run.specialist_results.append(item)
+            else:
+                logger.warning("Specialist failed: %s", item)
+
         errors = [r for r in results if isinstance(r, Exception)]
-        qa_run.success = len(errors) == 0
+        qa_run.success = len(errors) == 0 and not any(
+            r.errors for r in qa_run.specialist_results
+        )
         qa_run.completed_at = datetime.utcnow()
 
         if errors:
