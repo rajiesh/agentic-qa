@@ -261,11 +261,32 @@ class SessionAgent:
 
     # ── Agentic loop ───────────────────────────────────────────────────────────
 
+    def _trim_history(self) -> None:
+        """
+        Trim conversation_history to the most recent session_history_max_turns * 2 messages.
+        Ensures the trimmed list always starts with a user message (required by the API).
+        """
+        max_msgs = self.base_config.session_history_max_turns * 2
+        history = self.state.conversation_history
+        if len(history) <= max_msgs:
+            return
+        trimmed = history[-max_msgs:]
+        # API requires the first message to have role="user"
+        while trimmed and trimmed[0].get("role") != "user":
+            trimmed = trimmed[1:]
+        logger.debug(
+            "Session history trimmed to %d messages (was %d)", len(trimmed), len(history)
+        )
+        self.state.conversation_history = trimmed
+
     async def _agentic_loop(self) -> str:
         for _ in range(_MAX_ITERS):
+            # Keep history within the configured window before each API call
+            self._trim_history()
+
             response = await self.client.messages.create(
                 model=self.base_config.model,
-                max_tokens=4096,
+                max_tokens=self.base_config.max_tokens_session,
                 system=[
                     {
                         "type": "text",
@@ -585,6 +606,13 @@ class SessionAgent:
             max_repo_size_mb=self.base_config.max_repo_size_mb,
             lint_generated=self.base_config.lint_generated,
             concurrency_limit=self.base_config.concurrency_limit,
+            repo_concurrency_limit=self.base_config.repo_concurrency_limit,
+            max_retries=self.base_config.max_retries,
+            retry_base_wait_secs=self.base_config.retry_base_wait_secs,
+            retry_max_wait_secs=self.base_config.retry_max_wait_secs,
+            max_tokens_session=self.base_config.max_tokens_session,
+            max_context_tool_pairs=self.base_config.max_context_tool_pairs,
+            session_history_max_turns=self.base_config.session_history_max_turns,
         )
         # Apply persistent session overrides
         for test_type, enabled in self.state.config_overrides.items():

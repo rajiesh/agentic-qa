@@ -15,6 +15,7 @@ from .agents.specialists.performance import PerformanceTestAgent
 from .agents.specialists.security import SecurityTestAgent
 from .agents.strategist import StrategistAgent
 from .config import QAConfig, RepoTarget
+from .core.cost_tracker import BudgetExceededError, CostTracker
 from .core.models import QARun, SpecialistResult, TestType
 from .core.output_manager import OutputManager
 from .core.repo_ingestor import RepoIngestor
@@ -41,9 +42,25 @@ class QAOrchestrator:
         self.ingestor = RepoIngestor(config)
 
     async def run(self, targets: list[RepoTarget]) -> list[QARun]:
-        return list(await asyncio.gather(*[self._run_one(t) for t in targets]))
+        # One cost tracker shared across the entire batch
+        cost_tracker = CostTracker(budget_usd=self.config.cost_budget_usd)
 
-    async def _run_one(self, target: RepoTarget) -> QARun:
+        # Bound outer repo-level parallelism to avoid saturating the API
+        sem = asyncio.Semaphore(self.config.repo_concurrency_limit)
+
+        async def _bounded(t: RepoTarget) -> QARun:
+            async with sem:
+                return await self._run_one(t, cost_tracker=cost_tracker)
+
+        results = list(await asyncio.gather(*[_bounded(t) for t in targets]))
+        logger.info("Batch complete. %s", cost_tracker)
+        return results
+
+    async def _run_one(
+        self,
+        target: RepoTarget,
+        cost_tracker: CostTracker | None = None,
+    ) -> QARun:
         qa_run = QARun(repo_url=target.url)
         logger.info("Starting QA run %s for %s", qa_run.run_id, target.url)
 
@@ -56,6 +73,7 @@ class QAOrchestrator:
             client=self.client,
             config=self.config,
             agent_id=f"strategist-{qa_run.run_id[:8]}",
+            cost_tracker=cost_tracker,
         )
         try:
             test_plan = await strategist.run(
@@ -63,6 +81,8 @@ class QAOrchestrator:
                 repo_url=target.url,
                 doc_links=target.doc_links,
             )
+        except BudgetExceededError:
+            raise  # propagate so the outer gather sees it
         except Exception as exc:
             logger.error("Strategist failed: %s", exc)
             qa_run.completed_at = datetime.utcnow()
@@ -117,6 +137,7 @@ class QAOrchestrator:
                     client=self.client,
                     config=self.config,
                     agent_id=f"{entry.test_type}-{qa_run.run_id[:8]}",
+                    cost_tracker=cost_tracker,
                 )
                 try:
                     return await agent.run(
@@ -125,6 +146,8 @@ class QAOrchestrator:
                         repo_local_path=str(repo_path),
                         output_manager=output_manager,
                     )
+                except BudgetExceededError:
+                    raise  # bubble up so the gather sees it
                 except Exception as exc:
                     logger.error("Specialist %s failed: %s", entry.test_type, exc)
                     return exc

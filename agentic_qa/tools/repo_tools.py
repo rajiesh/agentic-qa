@@ -10,7 +10,13 @@ async def async_read_file(
     path: str,
     repo_root: str = ".",
     max_lines: int = 300,
+    offset: int = 0,
 ) -> str:
+    """Read up to *max_lines* lines from *path* starting at line *offset* (0-indexed).
+
+    If the file has more lines beyond the window a hint is appended so the agent
+    can page forward with a follow-up call using the next offset value.
+    """
     full = Path(repo_root) / path
     if not full.exists():
         return f"[error] File not found: {path}"
@@ -19,11 +25,24 @@ async def async_read_file(
     try:
         text = await asyncio.to_thread(full.read_text, errors="replace")
         lines = text.splitlines()
-        if len(lines) > max_lines:
-            truncated = len(lines) - max_lines
-            lines = lines[:max_lines]
-            lines.append(f"\n... [{truncated} lines truncated] ...")
-        return "\n".join(lines)
+        total = len(lines)
+
+        # Clamp offset to valid range
+        offset = max(0, min(offset, total))
+        window = lines[offset : offset + max_lines]
+
+        remaining = total - (offset + len(window))
+        if remaining > 0:
+            next_offset = offset + max_lines
+            window.append(
+                f"\n... [{remaining} more lines not shown — "
+                f"call read_file with offset={next_offset} to continue] ..."
+            )
+        elif offset > 0:
+            # At the end of the file; let the agent know
+            window.append(f"\n... [end of file — {total} lines total] ...")
+
+        return "\n".join(window)
     except Exception as exc:
         return f"[error] Could not read {path}: {exc}"
 

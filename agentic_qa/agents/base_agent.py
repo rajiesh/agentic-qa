@@ -3,9 +3,12 @@ from __future__ import annotations
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import anthropic
+
+if TYPE_CHECKING:
+    from ..core.cost_tracker import CostTracker
 
 logger = logging.getLogger(__name__)
 
@@ -22,10 +25,12 @@ class BaseAgent(ABC):
         client: anthropic.AsyncAnthropic,
         config: Any,  # QAConfig — avoid circular import
         agent_id: str | None = None,
+        cost_tracker: "CostTracker | None" = None,
     ) -> None:
         self.client = client
         self.config = config
         self.agent_id = agent_id or f"{self.AGENT_ROLE}-{id(self)}"
+        self._cost_tracker = cost_tracker
         self._tools: list[dict[str, Any]] = []
         self._tool_handlers: dict[str, ToolHandler] = {}
         self._setup_tools()
@@ -83,13 +88,42 @@ class BaseAgent(ABC):
             if self._use_thinking():
                 kwargs["thinking"] = {"type": "enabled", "budget_tokens": 5000}
 
-            response = await self.client.messages.create(**kwargs)
+            # Retry with exponential backoff on rate-limit / server errors
+            response = None
+            for attempt in range(self.config.max_retries + 1):
+                try:
+                    response = await self.client.messages.create(**kwargs)
+                    break
+                except (anthropic.RateLimitError, anthropic.APIStatusError) as exc:
+                    if attempt == self.config.max_retries:
+                        raise
+                    wait = min(
+                        self.config.retry_base_wait_secs * (2 ** attempt),
+                        self.config.retry_max_wait_secs,
+                    )
+                    logger.warning(
+                        "[%s] API error (attempt %d/%d), retrying in %.1fs: %s",
+                        self.agent_id, attempt + 1, self.config.max_retries, wait, exc,
+                    )
+                    await asyncio.sleep(wait)
+            assert response is not None  # guaranteed by loop above
 
             u = response.usage
-            usage["input_tokens"] += u.input_tokens
-            usage["output_tokens"] += u.output_tokens
-            usage["cache_creation_input_tokens"] += getattr(u, "cache_creation_input_tokens", 0) or 0
-            usage["cache_read_input_tokens"] += getattr(u, "cache_read_input_tokens", 0) or 0
+            delta: dict[str, int] = {
+                "input_tokens": u.input_tokens,
+                "output_tokens": u.output_tokens,
+                "cache_creation_input_tokens": getattr(u, "cache_creation_input_tokens", 0) or 0,
+                "cache_read_input_tokens": getattr(u, "cache_read_input_tokens", 0) or 0,
+            }
+            usage["input_tokens"] += delta["input_tokens"]
+            usage["output_tokens"] += delta["output_tokens"]
+            usage["cache_creation_input_tokens"] += delta["cache_creation_input_tokens"]
+            usage["cache_read_input_tokens"] += delta["cache_read_input_tokens"]
+
+            # Budget enforcement: record usage then raise if over cap
+            if self._cost_tracker is not None:
+                await self._cost_tracker.record(delta)
+                self._cost_tracker.check_budget()  # raises BudgetExceededError if exceeded
 
             messages.append({"role": "assistant", "content": response.content})
 
@@ -104,6 +138,18 @@ class BaseAgent(ABC):
             if response.stop_reason == "tool_use":
                 tool_results = await self._execute_tool_calls(response.content)
                 messages.append({"role": "user", "content": tool_results})
+
+                # Sliding window: keep at most max_context_tool_pairs tool-exchange pairs.
+                # Each pair is (assistant/tool_use, user/tool_result) = 2 messages.
+                # messages[0] is always the initial task prompt and is never evicted.
+                tool_pairs = (len(messages) - 1) // 2
+                if tool_pairs > self.config.max_context_tool_pairs:
+                    logger.debug(
+                        "[%s] context window: evicting oldest tool pair (%d > %d)",
+                        self.agent_id, tool_pairs, self.config.max_context_tool_pairs,
+                    )
+                    del messages[1:3]  # drop oldest (assistant tool_use + user tool_result)
+
                 continue
 
             logger.warning("[%s] unexpected stop_reason=%s", self.agent_id, response.stop_reason)

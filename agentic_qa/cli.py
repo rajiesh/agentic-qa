@@ -74,7 +74,9 @@ def analyze(
     enable_api: bool = typer.Option(False, "--api", help="Enable API-specific tests"),
     no_e2e: bool = typer.Option(False, "--no-e2e", help="Disable Playwright E2E tests"),
     no_lint: bool = typer.Option(False, "--no-lint", help="Skip linting generated test files"),
-    concurrency: int = typer.Option(3, "--concurrency", "-c", help="Max parallel specialists"),
+    concurrency: int = typer.Option(3, "--concurrency", "-c", help="Max parallel specialists per repo"),
+    repo_concurrency: int = typer.Option(5, "--repo-concurrency", help="Max repos analyzed in parallel"),
+    budget: float | None = typer.Option(None, "--budget", help="USD cost cap (e.g. 5.00). Aborts if exceeded."),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Analyze repositories and generate a comprehensive test suite."""
@@ -85,6 +87,8 @@ def analyze(
             output_dir=output_dir,
             run_generated_tests=run_tests,
             concurrency_limit=concurrency,
+            repo_concurrency_limit=repo_concurrency,
+            cost_budget_usd=budget,
         )
     except Exception as exc:
         console.print(f"[red]Configuration error:[/red] {exc}")
@@ -246,7 +250,11 @@ def analyze_platform(
     no_contract: bool = typer.Option(False, "--no-contract", help="Skip contract test generation"),
     no_per_service: bool = typer.Option(False, "--no-per-service", help="Skip per-service test generation"),
     no_lint: bool = typer.Option(False, "--no-lint", help="Skip linting generated test files"),
-    concurrency: int = typer.Option(3, "--concurrency", "-c", help="Max parallel agents"),
+    concurrency: int = typer.Option(3, "--concurrency", "-c", help="Max parallel specialists per service"),
+    repo_concurrency: int = typer.Option(5, "--repo-concurrency", help="Max services analyzed in parallel"),
+    scanner_concurrency: int = typer.Option(10, "--scanner-concurrency", help="Max parallel service scanners (Phase 5)"),
+    budget: float | None = typer.Option(None, "--budget", help="USD cost cap (e.g. 10.00). Aborts if exceeded."),
+    resume: bool = typer.Option(True, "--resume/--no-resume", help="Resume from last checkpoint if available"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Analyze a multi-service platform and generate per-service + contract tests."""
@@ -266,6 +274,9 @@ def analyze_platform(
         config = QAConfig(  # type: ignore[call-arg]
             output_dir=output_dir,
             concurrency_limit=concurrency,
+            repo_concurrency_limit=repo_concurrency,
+            scanner_concurrency_limit=scanner_concurrency,
+            cost_budget_usd=budget,
         )
     except Exception as exc:
         console.print(f"[red]Configuration error:[/red] {exc}")
@@ -294,18 +305,32 @@ def analyze_platform(
     for svc in services:
         console.print(f"  • [bold]{svc.name}[/bold] ({svc.role})  {svc.repo_url}")
 
-    with Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console, transient=True) as progress:
-        progress.add_task("Running platform QA analysis...", total=None)
-        platform_run = asyncio.run(
-            _run_platform_orchestrator(
-                config,
-                platform_name,
-                services,
-                doc_links,
-                run_per_service=not no_per_service,
-                run_contracts=not no_contract,
+    if resume:
+        console.print("[dim]Checkpoint resume enabled — use --no-resume to start fresh.[/dim]")
+    if budget is not None:
+        console.print(f"[dim]Cost budget: ${budget:.2f} USD[/dim]")
+
+    try:
+        with Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console, transient=True) as progress:
+            progress.add_task("Running platform QA analysis...", total=None)
+            platform_run = asyncio.run(
+                _run_platform_orchestrator(
+                    config,
+                    platform_name,
+                    services,
+                    doc_links,
+                    run_per_service=not no_per_service,
+                    run_contracts=not no_contract,
+                    resume=resume,
+                )
             )
-        )
+    except Exception as exc:
+        from .core.cost_tracker import BudgetExceededError
+        if isinstance(exc, BudgetExceededError):
+            console.print(f"\n[red bold]Budget exceeded:[/red bold] {exc}")
+            console.print("[dim]Re-run with a higher --budget or --no-resume to start fresh.[/dim]")
+            raise typer.Exit(1)
+        raise
 
     _print_platform_summary(platform_run)
 
@@ -314,6 +339,7 @@ def analyze_platform(
 def plan_platform(
     platform_file: str = typer.Argument(..., help="Path to platform.yaml descriptor"),
     output_dir: str = typer.Option("outputs", "--output", "-o"),
+    resume: bool = typer.Option(True, "--resume/--no-resume", help="Resume from last checkpoint if available"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Discover platform architecture and contracts WITHOUT generating test code."""
@@ -350,6 +376,7 @@ def plan_platform(
                 doc_links,
                 run_per_service=False,
                 run_contracts=False,
+                resume=resume,
             )
         )
 
@@ -417,6 +444,7 @@ async def _run_platform_orchestrator(
     doc_links: list[str],
     run_per_service: bool,
     run_contracts: bool,
+    resume: bool = True,
 ) -> object:
     orchestrator = PlatformOrchestrator(config)
     return await orchestrator.run(
@@ -425,6 +453,7 @@ async def _run_platform_orchestrator(
         global_doc_links=doc_links,
         run_per_service=run_per_service,
         run_contracts=run_contracts,
+        resume=resume,
     )
 
 

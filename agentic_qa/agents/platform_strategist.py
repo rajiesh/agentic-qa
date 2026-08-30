@@ -107,13 +107,22 @@ class PlatformStrategistAgent(BaseAgent):
         self._tools = [
             {
                 "name": "read_file",
-                "description": "Read a file from a named service's repository.",
+                "description": (
+                    "Read a file from a named service's repository. "
+                    "If the result ends with a '… [N more lines not shown]' footer, "
+                    "call again with offset=<next_offset> to read the next page."
+                ),
                 "input_schema": {
                     "type": "object",
                     "properties": {
                         "service": {"type": "string", "description": "Service name"},
                         "path": {"type": "string", "description": "Repo-relative path"},
                         "max_lines": {"type": "integer", "default": 300},
+                        "offset": {
+                            "type": "integer",
+                            "default": 0,
+                            "description": "Start reading from this line number (0-indexed). Use when a file was truncated.",
+                        },
                     },
                     "required": ["service", "path"],
                 },
@@ -194,12 +203,12 @@ class PlatformStrategistAgent(BaseAgent):
         return self._service_paths.get(service)
 
     async def _handle_read_file(
-        self, service: str, path: str, max_lines: int = 300
+        self, service: str, path: str, max_lines: int = 300, offset: int = 0
     ) -> str:
         root = self._resolve(service)
         if root is None:
             return f"[error] Unknown service '{service}'. Known: {list(self._service_paths)}"
-        return await async_read_file(path=path, repo_root=root, max_lines=max_lines)
+        return await async_read_file(path=path, repo_root=root, max_lines=max_lines, offset=offset)
 
     async def _handle_list_directory(
         self, service: str, path: str = ".", depth: int = 2

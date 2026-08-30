@@ -229,4 +229,11 @@ async def detect_all_roles(
             "local_path": str(local_path) if local_path else "",
         }
 
-    return list(await asyncio.gather(*[_process(url) for url in repo_urls]))
+    # Bound clone concurrency to avoid hammering git hosts with 50+ simultaneous clones
+    clone_sem = asyncio.Semaphore(10)
+
+    async def _bounded_process(url: str) -> dict:
+        async with clone_sem:
+            return await _process(url)
+
+    return list(await asyncio.gather(*[_bounded_process(url) for url in repo_urls]))

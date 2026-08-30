@@ -40,5 +40,22 @@ class QAConfig(BaseSettings):
     max_repo_size_mb: int = 500
     run_generated_tests: bool = False   # reserved: run generated tests after generation
     lint_generated: bool = True         # run ruff/eslint on generated files after each specialist
-    concurrency_limit: int = 3
+    concurrency_limit: int = 3          # specialist parallelism within one repo
+    repo_concurrency_limit: int = 5     # outer repo-level parallelism gate
+    max_retries: int = 5                # API call retry attempts on rate-limit / server errors
+    retry_base_wait_secs: float = 5.0   # exponential-backoff base wait (seconds)
+    retry_max_wait_secs: float = 120.0  # cap on backoff wait (seconds)
+    # ── Context window management ──────────────────────────────────────────────
+    max_tokens_session: int = 4096              # max_tokens for the interactive session agent
+    max_context_tool_pairs: int = 10            # sliding window: max tool-use/result pairs kept
+    session_history_max_turns: int = 20         # interactive session conversation window (turns)
+    # ── Checkpointing ─────────────────────────────────────────────────────────
+    enable_checkpointing: bool = True           # save/load checkpoint.json during platform runs
+    checkpoint_dir: str | None = None          # override checkpoint location (default: output_dir/platform_name)
+    # ── Phase 5: Two-tier scanner/synthesizer ─────────────────────────────────
+    scanner_concurrency_limit: int = 10         # parallel ServiceScannerAgents
+    scanner_max_iterations: int = 15            # per-service scanner loop iterations
+    synthesizer_max_iterations: int = 8         # synthesis loop (no file reads)
+    # ── Phase 6: Cost budget enforcement ──────────────────────────────────────
+    cost_budget_usd: float | None = None        # None = unlimited; e.g. 5.00 = $5 cap
     specialists: SpecialistConfig = Field(default_factory=SpecialistConfig)

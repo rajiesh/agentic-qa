@@ -101,12 +101,21 @@ class StrategistAgent(BaseAgent):
         self._tools = [
             {
                 "name": "read_file",
-                "description": "Read the contents of a file in the repository.",
+                "description": (
+                    "Read the contents of a file in the repository. "
+                    "If the result ends with a '… [N more lines not shown]' footer, "
+                    "call again with offset=<next_offset> to read the next page."
+                ),
                 "input_schema": {
                     "type": "object",
                     "properties": {
                         "path": {"type": "string", "description": "Repo-relative file path"},
                         "max_lines": {"type": "integer", "default": 300},
+                        "offset": {
+                            "type": "integer",
+                            "default": 0,
+                            "description": "Start reading from this line number (0-indexed). Use when a file was truncated.",
+                        },
                     },
                     "required": ["path"],
                 },

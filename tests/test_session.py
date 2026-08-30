@@ -149,6 +149,14 @@ def agent_factory():
         mock_config.max_repo_size_mb = 500
         mock_config.lint_generated = True
         mock_config.concurrency_limit = 3
+        # Phase 1+2 fields
+        mock_config.repo_concurrency_limit = 5
+        mock_config.max_retries = 5
+        mock_config.retry_base_wait_secs = 5.0
+        mock_config.retry_max_wait_secs = 120.0
+        mock_config.max_tokens_session = 4096
+        mock_config.max_context_tool_pairs = 10
+        mock_config.session_history_max_turns = 20
         if state is None:
             state = SessionState()
         agent = SessionAgent(

@@ -143,3 +143,27 @@ class QARun(BaseModel):
     output_directory: str = ""
     completed_at: datetime | None = None
     success: bool = False
+
+
+# ── Phase 5: Two-tier scanner/synthesizer models ─────────────────────────────
+
+
+class ServiceSummary(BaseModel):
+    """
+    Compact contract-signal snapshot emitted by ServiceScannerAgent for one service.
+
+    Designed to be ~600 tokens so 50 summaries fit well within the synthesizer's
+    context budget (~30K tokens) while preserving every cross-service reference
+    the synthesizer needs to discover contracts.
+    """
+    name: str
+    role: str                            # e.g. "backend", "frontend"
+    tech_stack_hint: list[str] = []      # languages, frameworks, db drivers
+    outbound_http_urls: list[str] = []   # literal URLs / URL templates in code
+    env_service_refs: list[str] = []     # env vars like PAYMENT_SERVICE_URL
+    event_patterns: list[str] = []       # Kafka/RabbitMQ topics, channels
+    proto_files: list[str] = []          # repo-relative .proto paths
+    openapi_files: list[str] = []        # openapi.yaml / swagger.json paths
+    shared_db_hints: list[str] = []      # table/schema names that may be shared
+    exposed_endpoints: list[str] = []    # routes this service exposes (REST/GraphQL)
+    raw_notes: str = ""                  # free text for anything that doesn't fit above
