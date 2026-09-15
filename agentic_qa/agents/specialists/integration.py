@@ -20,11 +20,19 @@ Generate COMPLETE integration tests that verify multiple components work togethe
 3. End-to-end data flows across service boundaries
 4. Contract tests for inter-service communication
 
-Use real dependencies where possible (testcontainers, docker-compose fixtures).
-For Python: pytest with testcontainers-python or pytest-docker.
-For JS: Jest with test containers or mock servers.
+Use real dependencies where possible (testcontainers, docker-compose fixtures). Choose the
+idiomatic test framework for the target's actual language (tech_stack.languages /
+tech_stack.frameworks / tech_stack.test_frameworks_existing), e.g. Python → pytest with
+testcontainers-python or pytest-docker; JS/TS → Jest with testcontainers or mock servers;
+Go → "testing" + dockertest; Java/Kotlin → JUnit5 + Testcontainers. Do not assume
+Python/JS by default.
 
 Include setup that spins up required infrastructure and teardown that cleans up.
+
+Whenever you add or change test files, also create or update README.md in the same output
+directory (via write_test_file) so it always reflects the current file set, exact install
+steps, and the run command — including how to start any required infrastructure (Docker,
+etc.). Do this before calling report_complete.
 """.strip()
 
 
@@ -63,13 +71,20 @@ class IntegrationTestAgent(BaseAgent):
             },
             {
                 "name": "write_test_file",
-                "description": "Write an integration test file.",
+                "description": "Write an integration test file (or README.md).",
                 "input_schema": {
                     "type": "object",
                     "properties": {
                         "filename": {"type": "string"},
                         "content": {"type": "string"},
                         "description": {"type": "string"},
+                        "framework": {
+                            "type": "string",
+                            "description": (
+                                "Test framework actually used, e.g. pytest, jest, go test. "
+                                "Omit for README.md."
+                            ),
+                        },
                     },
                     "required": ["filename", "content", "description"],
                 },
@@ -94,8 +109,13 @@ class IntegrationTestAgent(BaseAgent):
             "report_complete": self._handle_report_complete,
         }
 
-    async def _handle_write_test_file(self, filename: str, content: str, description: str) -> str:
-        framework = "pytest" if filename.endswith(".py") else "jest"
+    async def _handle_write_test_file(
+        self, filename: str, content: str, description: str, framework: str = ""
+    ) -> str:
+        if filename.rsplit("/", 1)[-1].lower() == "readme.md":
+            framework = "markdown"
+        elif not framework:
+            framework = "pytest" if filename.endswith(".py") else "jest"
         self._generated_files.append(
             GeneratedTestFile(
                 filename=filename, content=content,
@@ -125,6 +145,7 @@ class IntegrationTestAgent(BaseAgent):
             f"Rationale: {plan_entry.rationale}"
         )
         _, usage = await self._run_loop(user_message, max_iterations=15)
+        usage = await self._ensure_readme(self._generated_files, "write_test_file", usage)
         return SpecialistResult(
             test_type="integration", agent_id=self.agent_id,
             started_at=started_at, completed_at=datetime.utcnow(),

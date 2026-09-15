@@ -22,8 +22,10 @@ Given a test scope and tech stack, generate security test artifacts that cover:
 5. Security misconfiguration detection
 
 Output formats:
-- Python pytest scripts for programmatic security probes (use httpx for HTTP)
-- OWASP ZAP automation config YAML for active scanning
+- Programmatic security probes in the target's own language/test framework (e.g.
+  pytest + httpx for Python, Jest + supertest for Node, JUnit + RestAssured for Java) —
+  use tech_stack.languages / tech_stack.test_frameworks_existing to pick the right one
+- OWASP ZAP automation config YAML for active scanning (language-agnostic, always applicable)
 - SAST rule hints as comments / regex patterns
 
 Guidelines:
@@ -35,7 +37,12 @@ Guidelines:
 Workflow:
 1. Read authentication, route, and input validation code
 2. Write security test files
-3. Call report_complete
+3. Whenever you add or change test files, also create or update README.md in the same
+   output directory (via write_security_test, artifact_type="doc") so it always reflects the
+   current file set, exact install steps for whatever language/framework you used, how to
+   run OWASP ZAP if you produced a zap_config, and the run command. Do this before calling
+   report_complete.
+4. Call report_complete
 """.strip()
 
 
@@ -77,7 +84,7 @@ class SecurityTestAgent(BaseAgent):
             },
             {
                 "name": "write_security_test",
-                "description": "Write a security test file.",
+                "description": "Write a security test file (or README.md).",
                 "input_schema": {
                     "type": "object",
                     "properties": {
@@ -86,8 +93,18 @@ class SecurityTestAgent(BaseAgent):
                         "description": {"type": "string"},
                         "artifact_type": {
                             "type": "string",
-                            "enum": ["pytest", "zap_config", "sast_rules", "probe_script"],
-                            "description": "Type of security test artifact",
+                            "enum": ["probe_script", "zap_config", "sast_rules", "doc"],
+                            "description": (
+                                "Category of security artifact. Use \"doc\" for README.md."
+                            ),
+                        },
+                        "framework": {
+                            "type": "string",
+                            "description": (
+                                "For artifact_type=probe_script: the language/framework "
+                                "actually used, e.g. pytest+httpx, jest+supertest, "
+                                "junit+restassured."
+                            ),
                         },
                     },
                     "required": ["filename", "content", "description", "artifact_type"],
@@ -118,9 +135,15 @@ class SecurityTestAgent(BaseAgent):
         filename: str,
         content: str,
         description: str,
-        artifact_type: str = "pytest",
+        artifact_type: str = "probe_script",
+        framework: str = "",
     ) -> str:
-        framework = "pytest" if artifact_type == "pytest" else artifact_type
+        if artifact_type == "doc" or filename.rsplit("/", 1)[-1].lower() == "readme.md":
+            framework = "markdown"
+        elif artifact_type == "probe_script":
+            framework = framework or "pytest"
+        else:
+            framework = artifact_type
         self._generated_files.append(
             GeneratedTestFile(
                 filename=filename,
@@ -156,6 +179,7 @@ class SecurityTestAgent(BaseAgent):
         )
 
         _, usage = await self._run_loop(user_message, max_iterations=15)
+        usage = await self._ensure_readme(self._generated_files, "write_security_test", usage)
 
         return SpecialistResult(
             test_type="security",

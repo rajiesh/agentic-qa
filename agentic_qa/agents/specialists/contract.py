@@ -60,8 +60,15 @@ Exploration workflow:
 Code standards:
 - Python: use pytest, pact-python v2 (from pact import Consumer, Provider).
 - TypeScript: use @pact-foundation/pact with Jest.
+- If consumer/provider use a different ecosystem entirely (Go, Java, Ruby, ...), use that
+  ecosystem's idiomatic Pact client library instead — do not force Python/JS.
 - Tests must be self-contained and runnable; include all imports and fixtures.
-- Add a README.md to the contract output directory explaining how to run the tests.
+- Write a README.md under EACH service subdirectory you write files to (consumer and,
+  separately, provider — they may use different languages/frameworks). Each README covers
+  prerequisites (exact install command for that service's actual framework), setup (mock
+  service port, PACT_BROKER/PACT_DIR env vars if used), and the run command. Whenever you
+  add or change files in a subdirectory, update that subdirectory's README too, before
+  calling report_complete.
 """.strip()
 
 
@@ -125,7 +132,9 @@ class ContractTestAgent(BaseAgent):
                     "properties": {
                         "service": {
                             "type": "string",
-                            "description": "Which service this file belongs to: consumer or provider",
+                            "description": (
+                                "Which service this file belongs to: consumer or provider"
+                            ),
                         },
                         "filename": {"type": "string"},
                         "content": {"type": "string"},
@@ -240,11 +249,21 @@ class ContractTestAgent(BaseAgent):
             "2. Explore the provider service to find route definitions and response schemas.\n"
             "3. Read any schema_files listed in the contract.\n"
             "4. Write all contract test files using write_contract_file.\n"
-            "5. Write a README.md (service='consumer') explaining how to run the tests.\n"
+            "5. Write a README.md in EACH service subdir you wrote to (service='consumer' "
+            "and, separately, service='provider') explaining prerequisites/setup/run for "
+            "that service's actual framework.\n"
             "6. Call report_complete."
         )
 
         _, usage = await self._run_loop(user_message, max_iterations=20)
+
+        dirs = {f.filename.rsplit("/", 1)[0] for f in self._generated_files if "/" in f.filename}
+        for d in dirs:
+            service = "provider" if d.endswith("/provider") else "consumer"
+            usage = await self._ensure_readme(
+                self._generated_files, "write_contract_file", usage,
+                subdir=d, extra_hint=f"Pass service='{service}' so it lands in {d}.",
+            )
 
         return SpecialistResult(
             test_type="contract",
@@ -258,6 +277,8 @@ class ContractTestAgent(BaseAgent):
 
 def _detect_framework(filename: str, service: str, entry: ContractTestEntry) -> str:
     """Infer the framework from the filename extension and service role."""
+    if filename.rsplit("/", 1)[-1].lower() == "readme.md":
+        return "markdown"
     if filename.endswith(".py"):
         return entry.consumer_framework if "consumer" in service else entry.provider_framework
     if filename.endswith((".ts", ".js", ".spec.ts", ".spec.js")):

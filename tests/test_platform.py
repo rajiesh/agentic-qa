@@ -109,14 +109,15 @@ def test_load_platform_multi_repo(tmp_path):
         docs:
           - https://docs.example.com
     """)
-    name, services, docs = load_platform(path)
-    assert name == "my-platform"
-    assert len(services) == 2
-    assert services[0].name == "auth"
-    assert services[0].branch == "develop"
-    assert services[0].doc_links == ["https://wiki/auth"]
-    assert services[1].role == "frontend"
-    assert docs == ["https://docs.example.com"]
+    descriptor = load_platform(path)
+    assert descriptor.platform_name == "my-platform"
+    assert len(descriptor.services) == 2
+    assert descriptor.services[0].name == "auth"
+    assert descriptor.services[0].branch == "develop"
+    assert descriptor.services[0].doc_links == ["https://wiki/auth"]
+    assert descriptor.services[1].role == "frontend"
+    assert descriptor.system_docs == ["https://docs.example.com"]
+    assert descriptor.subsystems == []
 
 
 def test_load_platform_monorepo(tmp_path):
@@ -133,15 +134,82 @@ def test_load_platform_monorepo(tmp_path):
                 path: services/worker
                 role: worker
     """)
-    name, services, docs = load_platform(path)
-    assert name == "mono"
+    descriptor = load_platform(path)
+    assert descriptor.platform_name == "mono"
+    services = descriptor.services
     assert len(services) == 2
     # sparse_paths should be set to the sub-path
     assert services[0].sparse_paths == ["services/api"]
     assert services[1].sparse_paths == ["services/worker"]
     # both share same repo_url
     assert services[0].repo_url == services[1].repo_url == "https://github.com/org/monorepo"
-    assert docs == []
+    assert descriptor.system_docs == []
+
+
+def test_load_platform_with_subsystems_parses_correctly(tmp_path):
+    path = _write_yaml(tmp_path, """
+        name: my-platform
+        services:
+          - name: auth
+            url: https://github.com/org/auth
+          - name: billing
+            url: https://github.com/org/billing
+        subsystems:
+          - name: payments-subsystem
+            services: [auth, billing]
+            docs:
+              - https://wiki.internal/payments-architecture
+    """)
+    descriptor = load_platform(path)
+    assert len(descriptor.subsystems) == 1
+    sub = descriptor.subsystems[0]
+    assert sub.name == "payments-subsystem"
+    assert sub.services == ["auth", "billing"]
+    assert sub.docs == ["https://wiki.internal/payments-architecture"]
+
+
+def test_load_platform_subsystem_unknown_service_raises(tmp_path):
+    path = _write_yaml(tmp_path, """
+        name: my-platform
+        services:
+          - name: auth
+            url: https://github.com/org/auth
+        subsystems:
+          - name: bad-subsystem
+            services: [nonexistent]
+    """)
+    with pytest.raises(ValueError, match="unknown service"):
+        load_platform(path)
+
+
+def test_load_platform_subsystem_empty_services_raises(tmp_path):
+    path = _write_yaml(tmp_path, """
+        name: my-platform
+        services:
+          - name: auth
+            url: https://github.com/org/auth
+        subsystems:
+          - name: empty-subsystem
+            services: []
+    """)
+    with pytest.raises(ValueError, match="no services listed"):
+        load_platform(path)
+
+
+def test_load_platform_duplicate_subsystem_name_raises(tmp_path):
+    path = _write_yaml(tmp_path, """
+        name: my-platform
+        services:
+          - name: auth
+            url: https://github.com/org/auth
+        subsystems:
+          - name: dup
+            services: [auth]
+          - name: dup
+            services: [auth]
+    """)
+    with pytest.raises(ValueError, match="Duplicate subsystem name"):
+        load_platform(path)
 
 
 def test_load_platform_no_services_raises(tmp_path):

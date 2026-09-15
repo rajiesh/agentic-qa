@@ -265,10 +265,11 @@ def analyze_platform(
         raise typer.Exit(1)
 
     try:
-        platform_name, services, doc_links = load_platform(platform_file)
+        descriptor = load_platform(platform_file)
     except Exception as exc:
         console.print(f"[red]Failed to parse platform descriptor:[/red] {exc}")
         raise typer.Exit(1) from exc
+    platform_name, services = descriptor.platform_name, descriptor.services
 
     try:
         config = QAConfig(  # type: ignore[call-arg]
@@ -304,6 +305,8 @@ def analyze_platform(
     )
     for svc in services:
         console.print(f"  • [bold]{svc.name}[/bold] ({svc.role})  {svc.repo_url}")
+    if descriptor.subsystems:
+        console.print(f"[dim]Subsystems: {len(descriptor.subsystems)}[/dim]")
 
     if resume:
         console.print("[dim]Checkpoint resume enabled — use --no-resume to start fresh.[/dim]")
@@ -318,7 +321,8 @@ def analyze_platform(
                     config,
                     platform_name,
                     services,
-                    doc_links,
+                    descriptor.system_docs,
+                    descriptor.subsystems,
                     run_per_service=not no_per_service,
                     run_contracts=not no_contract,
                     resume=resume,
@@ -350,10 +354,11 @@ def plan_platform(
         raise typer.Exit(1)
 
     try:
-        platform_name, services, doc_links = load_platform(platform_file)
+        descriptor = load_platform(platform_file)
     except Exception as exc:
         console.print(f"[red]Failed to parse platform descriptor:[/red] {exc}")
         raise typer.Exit(1) from exc
+    platform_name, services = descriptor.platform_name, descriptor.services
 
     try:
         config = QAConfig(output_dir=output_dir)  # type: ignore[call-arg]
@@ -365,6 +370,8 @@ def plan_platform(
         f"\n[bold cyan]Platform:[/bold cyan] {platform_name} "
         f"([dim]{len(services)} services[/dim])\n"
     )
+    if descriptor.subsystems:
+        console.print(f"[dim]Subsystems: {len(descriptor.subsystems)}[/dim]")
 
     with Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console, transient=True) as progress:
         progress.add_task("Discovering platform architecture...", total=None)
@@ -373,7 +380,8 @@ def plan_platform(
                 config,
                 platform_name,
                 services,
-                doc_links,
+                descriptor.system_docs,
+                descriptor.subsystems,
                 run_per_service=False,
                 run_contracts=False,
                 resume=resume,
@@ -441,7 +449,8 @@ async def _run_platform_orchestrator(
     config: QAConfig,
     platform_name: str,
     services: list,
-    doc_links: list[str],
+    system_docs: list[str],
+    subsystems: list,
     run_per_service: bool,
     run_contracts: bool,
     resume: bool = True,
@@ -450,7 +459,8 @@ async def _run_platform_orchestrator(
     return await orchestrator.run(
         platform_name=platform_name,
         services=services,
-        global_doc_links=doc_links,
+        system_docs=system_docs,
+        subsystems=subsystems,
         run_per_service=run_per_service,
         run_contracts=run_contracts,
         resume=resume,

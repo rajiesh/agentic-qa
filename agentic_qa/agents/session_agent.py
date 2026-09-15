@@ -64,7 +64,17 @@ SESSION_TOOLS: list[dict[str, Any]] = [
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Documentation URLs",
-                }
+                },
+                "repo_url": {
+                    "type": "string",
+                    "description": (
+                        "Optional. If set, scope these docs to only this repo "
+                        "(must already be in the session via add_repos). Omit for "
+                        "session-wide docs applied to every repo. Note: docs added "
+                        "here are NOT used for platform.yaml runs — those come from "
+                        "the platform.yaml file's own docs:/subsystems: blocks."
+                    ),
+                },
             },
             "required": ["urls"],
         },
@@ -342,7 +352,7 @@ class SessionAgent:
     async def _dispatch_tool(self, name: str, inputs: dict[str, Any]) -> str:
         dispatch: dict[str, Any] = {
             "add_repos": lambda: self._tool_add_repos(inputs.get("urls", [])),
-            "add_docs": lambda: self._tool_add_docs(inputs.get("urls", [])),
+            "add_docs": lambda: self._tool_add_docs(inputs.get("urls", []), inputs.get("repo_url")),
             "configure": lambda: self._tool_configure(
                 inputs["test_type"], inputs["enabled"]
             ),
@@ -381,14 +391,21 @@ class SessionAgent:
             return f"Added {len(added)} repo(s): {', '.join(names)}"
         return "All specified repos were already in the session."
 
-    async def _tool_add_docs(self, urls: list[str]) -> str:
-        added = []
-        for url in urls:
-            if url not in self.state.doc_links:
-                self.state.doc_links.append(url)
-                added.append(url)
+    async def _tool_add_docs(self, urls: list[str], repo_url: str | None = None) -> str:
+        if repo_url:
+            if repo_url not in self.state.repos:
+                return f"[error] '{repo_url}' is not in the session. Call add_repos first."
+            bucket = self.state.repo_doc_links.setdefault(repo_url, [])
+            added = [u for u in urls if u not in bucket]
+            bucket.extend(added)
+            if added:
+                return f"Added {len(added)} doc link(s) scoped to {repo_url}."
+            return "All specified doc links were already scoped to that repo."
+
+        added = [u for u in urls if u not in self.state.doc_links]
+        self.state.doc_links.extend(added)
         if added:
-            return f"Added {len(added)} doc link(s)."
+            return f"Added {len(added)} session-wide doc link(s) (applied to all repos)."
         return "All specified doc links were already in the session."
 
     async def _tool_configure(self, test_type: str, enabled: bool) -> str:
@@ -405,7 +422,10 @@ class SessionAgent:
             )
 
         config = self._make_plan_config()
-        targets = [RepoTarget(url=r, doc_links=self.state.doc_links) for r in target_repos]
+        targets = [
+            RepoTarget(url=r, doc_links=self.state.doc_links + self.state.repo_doc_links.get(r, []))
+            for r in target_repos
+        ]
 
         self.console.print(
             f"\n[dim]  ↳ Running strategist on {len(targets)} repo(s)...[/dim]"
@@ -450,7 +470,10 @@ class SessionAgent:
             )
 
         config = self._make_config(skip_types=skip_types)
-        targets = [RepoTarget(url=r, doc_links=self.state.doc_links) for r in target_repos]
+        targets = [
+            RepoTarget(url=r, doc_links=self.state.doc_links + self.state.repo_doc_links.get(r, []))
+            for r in target_repos
+        ]
 
         self.console.print(
             f"\n[dim]  ↳ Running full QA analysis on {len(targets)} repo(s)...[/dim]"
@@ -484,9 +507,16 @@ class SessionAgent:
             return f"[error] Platform file not found: {platform_yaml}"
 
         try:
-            platform_name, services, doc_links = load_platform(platform_yaml)
+            descriptor = load_platform(platform_yaml)
         except Exception as exc:
             return f"[error] Failed to parse {platform_yaml}: {exc}"
+        platform_name, services = descriptor.platform_name, descriptor.services
+
+        if self.state.doc_links or self.state.repo_doc_links:
+            self.console.print(
+                "[dim]  Note: session doc links are not applied to platform runs — "
+                "add them to platform.yaml's docs:/subsystems: blocks instead.[/dim]"
+            )
 
         config = self._make_config()
         self.console.print(
@@ -496,7 +526,8 @@ class SessionAgent:
         run = await orchestrator.run(
             platform_name=platform_name,
             services=services,
-            global_doc_links=doc_links,
+            system_docs=descriptor.system_docs,
+            subsystems=descriptor.subsystems,
             run_per_service=False,
             run_contracts=False,
         )
@@ -529,9 +560,16 @@ class SessionAgent:
             return f"[error] Platform file not found: {platform_yaml}"
 
         try:
-            platform_name, services, doc_links = load_platform(platform_yaml)
+            descriptor = load_platform(platform_yaml)
         except Exception as exc:
             return f"[error] Failed to parse {platform_yaml}: {exc}"
+        platform_name, services = descriptor.platform_name, descriptor.services
+
+        if self.state.doc_links or self.state.repo_doc_links:
+            self.console.print(
+                "[dim]  Note: session doc links are not applied to platform runs — "
+                "add them to platform.yaml's docs:/subsystems: blocks instead.[/dim]"
+            )
 
         config = self._make_config(skip_types=skip_types)
         self.console.print(
@@ -541,7 +579,8 @@ class SessionAgent:
         run = await orchestrator.run(
             platform_name=platform_name,
             services=services,
-            global_doc_links=doc_links,
+            system_docs=descriptor.system_docs,
+            subsystems=descriptor.subsystems,
             run_per_service=True,
             run_contracts=True,
         )
@@ -569,11 +608,17 @@ class SessionAgent:
         if not self.state.repos:
             lines.append("  (none)")
 
-        lines.append(f"Doc links ({len(self.state.doc_links)}):")
+        lines.append(f"Doc links ({len(self.state.doc_links)}, session-wide):")
         for d in self.state.doc_links:
             lines.append(f"  • {d}")
         if not self.state.doc_links:
             lines.append("  (none)")
+        if self.state.repo_doc_links:
+            lines.append("Per-repo doc links:")
+            for repo, docs in self.state.repo_doc_links.items():
+                lines.append(f"  {repo}:")
+                for d in docs:
+                    lines.append(f"    • {d}")
 
         if self.state.config_overrides:
             lines.append("Config overrides:")

@@ -70,6 +70,12 @@ class PlatformCheckpoint(BaseModel):
     # key is "{consumer}__{provider}" (double-underscore separator)
     contract_states: dict[str, ServiceRunState] = {}
 
+    # ── Phase 1b: resolved documentation cache ───────────────────────────────
+    # url → fetched text. Only successful fetches are stored — a failed fetch
+    # (an "[error] ..." string) is never cached, so it is retried on the next
+    # --resume rather than being permanently stuck.
+    doc_cache: dict[str, str] = {}
+
     def reset_crashed_states(self) -> int:
         """
         Any "running" state means the process died mid-task. Reset those to

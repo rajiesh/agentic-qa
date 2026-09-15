@@ -264,6 +264,30 @@ class TestServiceScannerAgent:
         assert summary.outbound_http_urls == ["http://payments:8002"]
         assert usage["input_tokens"] == 300
 
+    @pytest.mark.asyncio
+    async def test_run_passes_doc_text_into_user_message(self):
+        """doc_text, when given, must appear in the message sent to _run_loop."""
+        scanner = self._make_scanner()
+        captured: dict[str, str] = {}
+
+        async def _fake_loop(user_msg: str, max_iterations: int = 15) -> tuple[str, dict]:
+            captured["user_msg"] = user_msg
+            await scanner._handle_emit_summary(name="auth", role="backend")
+            return "", {}
+
+        with patch.object(scanner, "_run_loop", new=_fake_loop):
+            await scanner.run(doc_text="fetched auth API documentation content")
+
+        assert "fetched auth API documentation content" in captured["user_msg"]
+
+    @pytest.mark.asyncio
+    async def test_run_without_doc_text_still_works(self):
+        """doc_text defaults to empty — existing no-arg callers keep working."""
+        scanner = self._make_scanner()
+        with patch.object(scanner, "_run_loop", new=AsyncMock(return_value=("", {}))):
+            summary, _usage = await scanner.run()
+        assert summary.name == "auth"
+
 
 # ── PlatformSynthesizerAgent — tool handler ──────────────────────────────────────
 
@@ -360,6 +384,22 @@ class TestPlatformSynthesizerAgent:
         assert len(arch.contracts) == 1
         assert arch.contracts[0].contract_type == "rest"
 
+    @pytest.mark.asyncio
+    async def test_run_passes_doc_text_into_user_message(self):
+        synth = self._make_synthesizer()
+        summaries = [ServiceSummary(name="auth", role="backend")]
+        captured: dict[str, str] = {}
+
+        async def _fake_loop(user_msg: str, max_iterations: int = 8) -> tuple[str, dict]:
+            captured["user_msg"] = user_msg
+            await synth._handle_emit_architecture(services=[{"name": "auth"}], contracts=[])
+            return "", {}
+
+        with patch.object(synth, "_run_loop", new=_fake_loop):
+            await synth.run(summaries=summaries, doc_text="system-wide architecture doc content")
+
+        assert "system-wide architecture doc content" in captured["user_msg"]
+
 
 # ── _summaries_to_message rendering ─────────────────────────────────────────────
 
@@ -406,3 +446,12 @@ class TestSummariesToMessage:
     def test_empty_summaries_still_produces_message(self):
         msg = _summaries_to_message([])
         assert "emit_platform_architecture" in msg
+
+    def test_doc_text_included_when_given(self):
+        msg = _summaries_to_message([ServiceSummary(name="svc", role="backend")], doc_text="architecture doc content")
+        assert "architecture doc content" in msg
+        assert "Platform documentation" in msg
+
+    def test_doc_text_omitted_by_default(self):
+        msg = _summaries_to_message([ServiceSummary(name="svc", role="backend")])
+        assert "Platform documentation" not in msg

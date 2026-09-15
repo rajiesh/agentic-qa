@@ -22,16 +22,26 @@ Given a test scope and tech stack, your task is to generate COMPLETE, EXECUTABLE
 4. Is immediately runnable without modification
 
 Guidelines:
-- For Python backends: use pytest, pytest-asyncio for async, httpx for API tests
-- For JavaScript/TypeScript: use Jest or Vitest with appropriate utilities
-- Include import statements, fixtures, and conftest.py entries as needed
+- Choose the idiomatic test framework for the target's actual language, using
+  tech_stack.languages / tech_stack.frameworks / tech_stack.test_frameworks_existing as your
+  signal. Match an existing test framework if the repo has one; otherwise pick the
+  ecosystem's standard tool (Python → pytest + pytest-asyncio + httpx; JavaScript/TypeScript
+  → Jest or Vitest; Go → "testing" + testify; Rust → cargo test; Java/Kotlin → JUnit5;
+  Ruby → RSpec; PHP → PHPUnit; C#/.NET → xUnit or NUnit). Do not assume Python or JavaScript
+  by default.
+- Include import statements, fixtures/equivalents, and setup/teardown idiomatic for that
+  framework
 - Test one concern per test function
 - Use descriptive test names that explain what is being tested
 
 Workflow:
 1. Use read_file and search_code to understand the code under test
 2. Generate test files using write_test_file
-3. Call report_complete when all files are written
+3. Whenever you add or change test files, also create or update README.md in the same
+   output directory (via write_test_file) so it always reflects the current file set, exact
+   install steps for whatever framework you used, and the run command. Do this before
+   calling report_complete.
+4. Call report_complete when all files are written
 """.strip()
 
 
@@ -74,13 +84,27 @@ class FunctionalTestAgent(BaseAgent):
             },
             {
                 "name": "write_test_file",
-                "description": "Write a test file to the output directory.",
+                "description": "Write a test file (or README.md) to the output directory.",
                 "input_schema": {
                     "type": "object",
                     "properties": {
-                        "filename": {"type": "string", "description": "File name (e.g. test_auth.py)"},
+                        "filename": {
+                            "type": "string",
+                            "description": "File name (e.g. test_auth.py, or README.md)",
+                        },
                         "content": {"type": "string", "description": "Full file content"},
-                        "description": {"type": "string", "description": "What this test file covers"},
+                        "description": {
+                            "type": "string",
+                            "description": "What this test file covers",
+                        },
+                        "framework": {
+                            "type": "string",
+                            "description": (
+                                "Test framework/tool actually used for this file, e.g. pytest, "
+                                "jest, vitest, go test, JUnit5 — match the target's real "
+                                "ecosystem. Omit for README.md."
+                            ),
+                        },
                     },
                     "required": ["filename", "content", "description"],
                 },
@@ -106,9 +130,12 @@ class FunctionalTestAgent(BaseAgent):
         }
 
     async def _handle_write_test_file(
-        self, filename: str, content: str, description: str
+        self, filename: str, content: str, description: str, framework: str = ""
     ) -> str:
-        framework = "pytest" if filename.endswith(".py") else "jest"
+        if filename.rsplit("/", 1)[-1].lower() == "readme.md":
+            framework = "markdown"
+        elif not framework:
+            framework = "pytest" if filename.endswith(".py") else "jest"
         self._generated_files.append(
             GeneratedTestFile(
                 filename=filename,
@@ -145,6 +172,7 @@ class FunctionalTestAgent(BaseAgent):
         )
 
         _, usage = await self._run_loop(user_message, max_iterations=20)
+        usage = await self._ensure_readme(self._generated_files, "write_test_file", usage)
 
         return SpecialistResult(
             test_type="functional",

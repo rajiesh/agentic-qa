@@ -16,8 +16,10 @@ from .config import QAConfig, RepoTarget
 from .core.checkpoint import PlatformCheckpoint
 from .core.checkpoint_manager import CheckpointManager
 from .core.cost_tracker import BudgetExceededError, CostTracker
+from .core.doc_resolver import resolve_platform_docs
 from .core.models import (
     ContractTestEntry,
+    DocSubsystem,
     PlatformArchitecture,
     PlatformRun,
     PlatformTestPlan,
@@ -68,7 +70,9 @@ class PlatformOrchestrator:
 
     Flow:
       1. Clone all service repos (parallel, bounded by semaphore).
-      2. Run PlatformStrategistAgent to discover cross-service contracts.
+      1b. Resolve & pre-fetch documentation (service/subsystem/system-scoped, deduped).
+      2. Scan each service (ServiceScannerAgent) and synthesize the architecture
+         (PlatformSynthesizerAgent) to discover cross-service contracts.
       3. Run per-service StrategistAgent + specialists (reuses QAOrchestrator._run_one).
       4. Run ContractTestAgent for each discovered contract (parallel, bounded).
       5. Persist output and return PlatformRun.
@@ -87,11 +91,14 @@ class PlatformOrchestrator:
         self,
         platform_name: str,
         services: list[ServiceDescriptor],
-        global_doc_links: list[str],
+        system_docs: list[str] | None = None,
+        subsystems: list[DocSubsystem] | None = None,
         run_per_service: bool = True,
         run_contracts: bool = True,
         resume: bool = True,
     ) -> PlatformRun:
+        system_docs = system_docs or []
+        subsystems = subsystems or []
 
         # ── Checkpoint setup ───────────────────────────────────────────────────
         ckpt_mgr: CheckpointManager | None = None
@@ -194,6 +201,19 @@ class PlatformOrchestrator:
                 arch = None
 
         if arch is None:
+            # ── 1b. Resolve & pre-fetch documentation (service/subsystem/system) ──
+            resolved_docs = await resolve_platform_docs(
+                services=services,
+                system_docs=system_docs,
+                subsystems=subsystems,
+                existing_cache=checkpoint.doc_cache if checkpoint else None,
+                max_chars_per_doc=self.config.doc_fetch_max_chars,
+                fetch_concurrency=self.config.doc_fetch_concurrency,
+            )
+            if ckpt_mgr and checkpoint:
+                ckpt_mgr.mark_docs_resolved(checkpoint, resolved_docs.cache)
+                ckpt_mgr.save(checkpoint)
+
             # ── 2a. Parallel per-service scanning ─────────────────────────────
             scanner_sem = asyncio.Semaphore(
                 getattr(self.config, "scanner_concurrency_limit", 10)
@@ -215,7 +235,9 @@ class PlatformOrchestrator:
                         agent_id=f"scanner-{svc.name[:12]}-{platform_run.run_id[:6]}",
                         cost_tracker=cost_tracker,
                     )
-                    summary, usage = await scanner.run()
+                    summary, usage = await scanner.run(
+                        doc_text=resolved_docs.per_service_text.get(svc.name, "")
+                    )
                     if ckpt_mgr and checkpoint:
                         ckpt_mgr.mark_scan_complete(
                             checkpoint, svc.name, summary.model_dump_json(), usage
@@ -253,6 +275,7 @@ class PlatformOrchestrator:
                 arch = await synthesizer.run(
                     summaries=summaries,
                     platform_name=platform_name,
+                    doc_text=resolved_docs.synthesizer_text,
                 )
                 if ckpt_mgr and checkpoint:
                     ckpt_mgr.mark_architecture_complete(checkpoint, arch.model_dump_json())

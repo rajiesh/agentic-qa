@@ -239,19 +239,24 @@ class ServiceScannerAgent(BaseAgent):
 
     async def run(  # type: ignore[override]
         self,
+        doc_text: str = "",
         **_kwargs: Any,
     ) -> tuple[ServiceSummary, dict[str, int]]:
         """
         Scan the service and return (ServiceSummary, token_usage).
         Falls back to a minimal summary if the agent loop fails to call
         emit_service_summary within max_iterations.
+
+        doc_text, when given, is the pre-fetched content of this service's own
+        doc_links (resolved centrally by doc_resolver.resolve_platform_docs).
         """
         svc = self._service
         user_msg = (
             f"Service name: {svc.name}\n"
             f"Role: {svc.role}\n"
             f"Repository path: {svc.local_path or svc.repo_url}\n"
-            f"Doc links: {', '.join(svc.doc_links) or 'none'}\n\n"
+            f"Doc links: {', '.join(svc.doc_links) or 'none'}\n"
+            f"Fetched documentation content:\n{doc_text or '(no doc content fetched)'}\n\n"
             "Please scan this service repository and call emit_service_summary "
             "when you have identified all cross-service contract signals."
         )

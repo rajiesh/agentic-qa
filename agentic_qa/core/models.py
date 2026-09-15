@@ -8,7 +8,6 @@ from pydantic import BaseModel, Field
 
 TestType = Literal["functional", "performance", "security", "integration", "api", "e2e", "contract"]
 Priority = Literal["critical", "high", "medium", "low"]
-Framework = Literal["pytest", "jest", "vitest", "locust", "k6", "zap", "playwright", "httpx"]
 
 
 class TechStack(BaseModel):
@@ -33,7 +32,9 @@ class TestPlanEntry(BaseModel):
     test_type: TestType
     priority: Priority
     scope: TestScope
-    suggested_framework: Framework
+    # Idiomatic test framework/tool for the target's actual language & ecosystem
+    # (e.g. "pytest", "Jest", "go test", "JUnit5", "cargo test") — not a fixed set.
+    suggested_framework: str
     estimated_files: int = 1
     rationale: str
 
@@ -82,6 +83,21 @@ class ServiceDescriptor(BaseModel):
     doc_links: list[str] = []
     branch: str = "main"
     sparse_paths: list[str] = []
+
+
+class DocSubsystem(BaseModel):
+    """A named cross-cutting concern whose docs describe a subset of services."""
+    name: str
+    services: list[str]
+    docs: list[str] = []
+
+
+class PlatformDescriptor(BaseModel):
+    """Parsed result of load_platform() — replaces the old (name, services, docs) 3-tuple."""
+    platform_name: str
+    services: list[ServiceDescriptor]
+    system_docs: list[str] = []
+    subsystems: list[DocSubsystem] = []
 
 
 class ServiceContract(BaseModel):

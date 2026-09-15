@@ -38,6 +38,15 @@ Monorepo (multiple services inside one repo, addressed by sub-path):
       - https://confluence.internal/arch
 
 Both shapes can be mixed freely in the same file.
+
+Subsystems (optional) — a doc describing a cross-cutting concern that spans a
+NAMED SUBSET of services (not just one, not necessarily all):
+
+    subsystems:
+      - name: payments-subsystem
+        services: [payments, auth]   # must match names declared above
+        docs:
+          - https://wiki.internal/payments-architecture
 """
 from __future__ import annotations
 
@@ -46,14 +55,11 @@ from typing import Any
 
 import yaml
 
-from .models import ServiceDescriptor, ServiceRole
+from .models import DocSubsystem, PlatformDescriptor, ServiceDescriptor, ServiceRole
 
 
-def load_platform(path: str) -> tuple[str, list[ServiceDescriptor], list[str]]:
-    """
-    Parse *path* and return:
-        (platform_name, list[ServiceDescriptor], global_doc_links)
-    """
+def load_platform(path: str) -> PlatformDescriptor:
+    """Parse *path* into a PlatformDescriptor (services, system-wide docs, subsystems)."""
     raw = yaml.safe_load(Path(path).read_text())
     name: str = raw.get("name", Path(path).stem)
     global_docs: list[str] = raw.get("docs", [])
@@ -93,7 +99,29 @@ def load_platform(path: str) -> tuple[str, list[ServiceDescriptor], list[str]]:
     if not services:
         raise ValueError(f"platform.yaml '{path}' contains no services.")
 
-    return name, services, global_docs
+    known_names = {s.name for s in services}
+    subsystems: list[DocSubsystem] = []
+    seen_subsystem_names: set[str] = set()
+    for sub in raw.get("subsystems", []):
+        sub_name: str = sub["name"]
+        if sub_name in seen_subsystem_names:
+            raise ValueError(f"Duplicate subsystem name '{sub_name}' in platform.yaml '{path}'.")
+        seen_subsystem_names.add(sub_name)
+
+        sub_services: list[str] = sub.get("services", [])
+        if not sub_services:
+            raise ValueError(f"Subsystem '{sub_name}' has no services listed.")
+        unknown = [s for s in sub_services if s not in known_names]
+        if unknown:
+            raise ValueError(
+                f"Subsystem '{sub_name}' references unknown service(s) {unknown}. "
+                f"Valid services: {sorted(known_names)}"
+            )
+        subsystems.append(DocSubsystem(name=sub_name, services=sub_services, docs=sub.get("docs", [])))
+
+    return PlatformDescriptor(
+        platform_name=name, services=services, system_docs=global_docs, subsystems=subsystems,
+    )
 
 
 def _role(raw: str) -> ServiceRole:

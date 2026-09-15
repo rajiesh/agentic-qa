@@ -58,4 +58,7 @@ class QAConfig(BaseSettings):
     synthesizer_max_iterations: int = 8         # synthesis loop (no file reads)
     # ── Phase 6: Cost budget enforcement ──────────────────────────────────────
     cost_budget_usd: float | None = None        # None = unlimited; e.g. 5.00 = $5 cap
+    # ── Doc resolution (system/subsystem/service doc mapping) ────────────────
+    doc_fetch_max_chars: int = 8000             # per-URL truncation, mirrors async_fetch_url default
+    doc_fetch_concurrency: int = 10             # parallel doc fetches
     specialists: SpecialistConfig = Field(default_factory=SpecialistConfig)

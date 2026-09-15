@@ -18,14 +18,16 @@ Given a test scope and tech stack, generate COMPLETE, RUNNABLE performance test 
 1. Simulate realistic user load patterns (ramp-up, steady state, ramp-down)
 2. Test critical API endpoints and workflows identified in the scope
 3. Include assertions for response time and error rate thresholds
-4. Use Locust (Python) for Python-based services, k6 (JS) for other services
+4. Choose the idiomatic load-testing tool for the target's ecosystem — Locust or k6 are good
+   general-purpose defaults, but if the repo's own ecosystem has a more standard tool
+   (Gatling for JVM, Artillery for Node, wrk2 scripts, etc.), prefer that instead.
 
-Locust guidelines:
+Locust guidelines (Python targets, default choice):
 - Define realistic User classes with task weights
 - Set think time between requests
 - Include response time assertions via catch_response context manager
 
-k6 guidelines:
+k6 guidelines (JS/general HTTP, alternative default):
 - Define stages for load shaping
 - Use thresholds for p95 response time and error rate
 - Group related requests with tags
@@ -33,7 +35,11 @@ k6 guidelines:
 Workflow:
 1. Read entry point / route files to understand the API surface
 2. Write performance test files
-3. Call report_complete
+3. Whenever you add or change test files, also create or update README.md in the same
+   output directory (via write_test_file, framework="markdown") so it always reflects the
+   current file set, exact install steps for the tool you used, and the run command
+   (including how to point it at a target host/URL). Do this before calling report_complete.
+4. Call report_complete
 """.strip()
 
 
@@ -75,7 +81,7 @@ class PerformanceTestAgent(BaseAgent):
             },
             {
                 "name": "write_test_file",
-                "description": "Write a performance test file (locustfile.py or k6_script.js).",
+                "description": "Write a performance test file (or README.md) to the output dir.",
                 "input_schema": {
                     "type": "object",
                     "properties": {
@@ -84,8 +90,10 @@ class PerformanceTestAgent(BaseAgent):
                         "description": {"type": "string"},
                         "framework": {
                             "type": "string",
-                            "enum": ["locust", "k6"],
-                            "description": "The performance testing framework used",
+                            "description": (
+                                "The load-testing tool actually used, e.g. locust, k6, "
+                                "gatling, artillery. Use \"markdown\" for README.md."
+                            ),
                         },
                     },
                     "required": ["filename", "content", "description", "framework"],
@@ -114,6 +122,8 @@ class PerformanceTestAgent(BaseAgent):
     async def _handle_write_test_file(
         self, filename: str, content: str, description: str, framework: str = "locust"
     ) -> str:
+        if filename.rsplit("/", 1)[-1].lower() == "readme.md":
+            framework = "markdown"
         self._generated_files.append(
             GeneratedTestFile(
                 filename=filename,
@@ -149,6 +159,7 @@ class PerformanceTestAgent(BaseAgent):
         )
 
         _, usage = await self._run_loop(user_message, max_iterations=15)
+        usage = await self._ensure_readme(self._generated_files, "write_test_file", usage)
 
         return SpecialistResult(
             test_type="performance",

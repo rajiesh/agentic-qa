@@ -175,6 +175,17 @@ def generate_platform_yaml(
             "#   - https://your-wiki/architecture",
         ]
 
+    lines += [
+        "",
+        "# subsystems: — group docs describing a concern that spans MULTIPLE services",
+        "# (cannot be auto-detected — define manually; service names must match above)",
+        "# subsystems:",
+        "#   - name: example-subsystem",
+        "#     services: [service-a, service-b]",
+        "#     docs:",
+        "#       - https://your-wiki/example-subsystem-architecture",
+    ]
+
     lines.append("")
     return "\n".join(lines)
 

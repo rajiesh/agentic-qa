@@ -33,6 +33,7 @@ class BaseAgent(ABC):
         self._cost_tracker = cost_tracker
         self._tools: list[dict[str, Any]] = []
         self._tool_handlers: dict[str, ToolHandler] = {}
+        self._last_messages: list[dict[str, Any]] = []
         self._setup_tools()
 
     @abstractmethod
@@ -133,6 +134,7 @@ class BaseAgent(ABC):
                     "",
                 )
                 logger.info("[%s] done. tokens=%s", self.agent_id, usage)
+                self._last_messages = messages
                 return text, usage
 
             if response.stop_reason == "tool_use":
@@ -156,7 +158,49 @@ class BaseAgent(ABC):
             break
 
         logger.warning("[%s] reached max_iterations=%d", self.agent_id, max_iterations)
+        self._last_messages = messages
         return "", usage
+
+    @staticmethod
+    def _readme_present(files: list[Any], subdir: str | None = None) -> bool:
+        """Whether a README.md is already among the generated files (optionally scoped)."""
+        for f in files:
+            if f.filename.rsplit("/", 1)[-1].lower() != "readme.md":
+                continue
+            if subdir is None or f.filename.startswith(subdir):
+                return True
+        return False
+
+    async def _ensure_readme(
+        self,
+        generated_files: list[Any],
+        write_tool_name: str,
+        usage: dict[str, int],
+        subdir: str | None = None,
+        extra_hint: str = "",
+    ) -> dict[str, int]:
+        """
+        Safety net, not a template: if the model forgot to write a README.md for what it just
+        generated, force one more turn asking it to write one — the model still authors the
+        actual content based on the files/framework it chose, this only guarantees it happens.
+        """
+        if not generated_files or self._readme_present(generated_files, subdir):
+            return usage
+        nudge = (
+            "You have not written a README.md yet"
+            + (f" under {subdir}" if subdir else "")
+            + f". Before finishing, call {write_tool_name} to create or update a README.md "
+            "in that same output directory covering: 1) Prerequisites — the exact install "
+            "command(s) for the language/framework/package manager you actually used above "
+            "(do not assume pytest/Jest — match what you actually wrote), 2) Setup — any env "
+            "vars, services, containers, or a running application required before these tests "
+            f"will pass, 3) Run — the exact command to execute them. {extra_hint} "
+            "Then call report_complete again."
+        )
+        _, usage2 = await self._run_loop(
+            nudge, max_iterations=4, extra_messages=self._last_messages
+        )
+        return {k: usage.get(k, 0) + usage2.get(k, 0) for k in usage}
 
     async def _execute_tool_calls(self, content: list[Any]) -> list[dict[str, Any]]:
         tool_blocks = [b for b in content if hasattr(b, "type") and b.type == "tool_use"]

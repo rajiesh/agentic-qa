@@ -42,6 +42,7 @@ class TestPlatformCheckpoint:
         assert ckpt.architecture_json == ""
         assert ckpt.service_qa_states == {}
         assert ckpt.contract_states == {}
+        assert ckpt.doc_cache == {}
 
     def test_contract_key_format(self):
         key = PlatformCheckpoint.contract_key("auth", "payments")
@@ -214,6 +215,28 @@ class TestCheckpointManagerMutators:
         key = PlatformCheckpoint.contract_key("frontend", "api")
         assert ckpt.contract_states[key].status == "failed"
         assert ckpt.contract_states[key].error == "timeout"
+
+    def test_mark_docs_resolved_persists_successful_fetches(self, tmp_path):
+        mgr = _mgr(tmp_path)
+        ckpt = _fresh()
+        mgr.mark_docs_resolved(ckpt, {"https://wiki/a": "content-a", "https://wiki/b": "content-b"})
+        assert ckpt.doc_cache == {"https://wiki/a": "content-a", "https://wiki/b": "content-b"}
+
+    def test_mark_docs_resolved_skips_error_entries(self, tmp_path):
+        mgr = _mgr(tmp_path)
+        ckpt = _fresh()
+        mgr.mark_docs_resolved(
+            ckpt,
+            {"https://wiki/good": "content", "https://wiki/bad": "[error] Failed to fetch: timeout"},
+        )
+        assert ckpt.doc_cache == {"https://wiki/good": "content"}
+
+    def test_doc_cache_round_trips_through_json(self, tmp_path):
+        mgr = _mgr(tmp_path)
+        ckpt = _fresh()
+        mgr.mark_docs_resolved(ckpt, {"https://wiki/a": "content-a"})
+        restored = PlatformCheckpoint.model_validate_json(ckpt.model_dump_json())
+        assert restored.doc_cache == {"https://wiki/a": "content-a"}
 
 
 # ── Resume skip logic ──────────────────────────────────────────────────────────

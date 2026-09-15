@@ -41,7 +41,10 @@ class SessionState:
     """Repository URLs or local paths added during this session."""
 
     doc_links: list[str] = field(default_factory=list)
-    """Documentation URLs passed to all agents as context."""
+    """Session-wide documentation URLs — applied to EVERY repo in run_plan/run_analyze."""
+
+    repo_doc_links: dict[str, list[str]] = field(default_factory=dict)
+    """repo_url -> doc URLs scoped ONLY to that repo."""
 
     config_overrides: dict[str, bool] = field(default_factory=dict)
     """Persistent test-type toggles, e.g. {"security": False}."""
@@ -102,9 +105,16 @@ def _handle_slash(cmd: str, state: SessionState, console: Console) -> bool:
 
     if token == "/docs":
         if state.doc_links:
+            console.print("[bold]Session-wide (applies to all repos):[/bold]")
             for d in state.doc_links:
                 console.print(f"  [dim]•[/dim] {d}")
-        else:
+        if state.repo_doc_links:
+            console.print("[bold]Per-repo:[/bold]")
+            for repo, docs in state.repo_doc_links.items():
+                console.print(f"  {repo}:")
+                for d in docs:
+                    console.print(f"    [dim]•[/dim] {d}")
+        if not state.doc_links and not state.repo_doc_links:
             console.print("[dim]  No doc links added yet.[/dim]")
         return False
 
@@ -147,6 +157,7 @@ def _handle_slash(cmd: str, state: SessionState, console: Console) -> bool:
     if token == "/clear":
         state.repos.clear()
         state.doc_links.clear()
+        state.repo_doc_links.clear()
         state.config_overrides.clear()
         state.qa_runs.clear()
         state.platform_run = None
@@ -156,6 +167,7 @@ def _handle_slash(cmd: str, state: SessionState, console: Console) -> bool:
     if token == "/reset":
         state.repos.clear()
         state.doc_links.clear()
+        state.repo_doc_links.clear()
         state.config_overrides.clear()
         state.qa_runs.clear()
         state.platform_run = None

@@ -39,3 +39,15 @@ def test_qa_run_defaults():
     assert run.success is False
     assert run.specialist_results == []
     assert run.test_plan is None
+
+
+def test_suggested_framework_not_limited_to_python_js_tooling():
+    """suggested_framework is a plain str — any ecosystem's idiomatic tool is valid."""
+    entry = TestPlanEntry(
+        test_type="functional",
+        priority="high",
+        scope=TestScope(description="Test Go HTTP handlers"),
+        suggested_framework="go test",
+        rationale="Go service needs handler coverage",
+    )
+    assert entry.suggested_framework == "go test"

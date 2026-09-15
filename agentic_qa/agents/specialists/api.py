@@ -21,11 +21,18 @@ Generate COMPLETE API test scripts that verify:
 4. Pagination, filtering, and sorting behavior
 5. Error handling and meaningful error messages
 
-For Python: use pytest + httpx (async) or requests.
-For JS/TS: use Jest + supertest or axios.
+Choose the idiomatic test framework for the target's actual language
+(tech_stack.languages / tech_stack.frameworks / tech_stack.test_frameworks_existing), e.g.
+Python → pytest + httpx (async) or requests; JS/TS → Jest + supertest or axios;
+Go → "testing" + net/http/httptest; Java/Kotlin → JUnit5 + RestAssured; Ruby → RSpec;
+PHP → PHPUnit. Do not assume Python/JS by default.
 
 Include a base URL configuration and authentication helper fixtures.
 Test both success and error scenarios for every endpoint.
+
+Whenever you add or change test files, also create or update README.md in the same output
+directory (via write_test_file) so it always reflects the current file set, exact install
+steps, and the run command. Do this before calling report_complete.
 """.strip()
 
 
@@ -64,13 +71,20 @@ class ApiTestAgent(BaseAgent):
             },
             {
                 "name": "write_test_file",
-                "description": "Write an API test file.",
+                "description": "Write an API test file (or README.md).",
                 "input_schema": {
                     "type": "object",
                     "properties": {
                         "filename": {"type": "string"},
                         "content": {"type": "string"},
                         "description": {"type": "string"},
+                        "framework": {
+                            "type": "string",
+                            "description": (
+                                "Test framework actually used, e.g. pytest, jest, go test. "
+                                "Omit for README.md."
+                            ),
+                        },
                     },
                     "required": ["filename", "content", "description"],
                 },
@@ -95,8 +109,13 @@ class ApiTestAgent(BaseAgent):
             "report_complete": self._handle_report_complete,
         }
 
-    async def _handle_write_test_file(self, filename: str, content: str, description: str) -> str:
-        framework = "httpx" if filename.endswith(".py") else "jest"
+    async def _handle_write_test_file(
+        self, filename: str, content: str, description: str, framework: str = ""
+    ) -> str:
+        if filename.rsplit("/", 1)[-1].lower() == "readme.md":
+            framework = "markdown"
+        elif not framework:
+            framework = "httpx" if filename.endswith(".py") else "jest"
         self._generated_files.append(
             GeneratedTestFile(
                 filename=filename, content=content,
@@ -126,6 +145,7 @@ class ApiTestAgent(BaseAgent):
             f"Rationale: {plan_entry.rationale}"
         )
         _, usage = await self._run_loop(user_message, max_iterations=15)
+        usage = await self._ensure_readme(self._generated_files, "write_test_file", usage)
         return SpecialistResult(
             test_type="api", agent_id=self.agent_id,
             started_at=started_at, completed_at=datetime.utcnow(),

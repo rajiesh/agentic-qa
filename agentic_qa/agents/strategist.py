@@ -45,8 +45,19 @@ Web E2E test guidance:
   Indicators: React/Vue/Angular/Next.js/Svelte/Nuxt dependencies, HTML templates served by the
   app, a components/ or pages/ directory, or a bundler config (vite.config, webpack.config).
 - For pure API-only backends (no frontend assets), do NOT include an "e2e" entry.
-- When including "e2e", set suggested_framework to "playwright" and list the key user-facing
-  routes/pages in scope.entry_points (e.g. "/login", "/dashboard", "/checkout").
+- When including "e2e", set suggested_framework to "playwright" by default and list the key
+  user-facing routes/pages in scope.entry_points (e.g. "/login", "/dashboard", "/checkout") —
+  unless the repo's existing e2e setup already standardizes on a different tool (Cypress,
+  WebdriverIO, Selenium), in which case suggest that one instead.
+
+Framework selection (applies to every entry, not just e2e):
+- suggested_framework is NOT limited to a fixed list. Choose whatever is idiomatic for the
+  target's actual language/ecosystem, using tech_stack.languages, tech_stack.frameworks, and
+  tech_stack.test_frameworks_existing as your signal. If the repo already has a test
+  framework in use, match it. Otherwise pick the ecosystem's standard tool, e.g.:
+  Python → pytest; JavaScript/TypeScript → Jest or Vitest; Go → the standard "testing"
+  package (+ testify); Rust → cargo test; Java/Kotlin → JUnit5; Ruby → RSpec; PHP → PHPUnit;
+  C#/.NET → xUnit or NUnit. Do not default to Python/JS tooling for a non-Python/JS codebase.
 
 The test plan JSON must match this schema exactly:
 {
@@ -70,7 +81,7 @@ The test plan JSON must match this schema exactly:
         "data_models": ["string"],
         "dependencies": ["string"]
       },
-      "suggested_framework": "pytest|jest|vitest|locust|k6|zap|playwright|httpx",
+      "suggested_framework": "string — idiomatic tool for the target's real ecosystem, e.g. pytest, Jest, Vitest, go test, cargo test, JUnit5, RSpec, PHPUnit, xUnit",
       "estimated_files": 1,
       "rationale": "string"
     }

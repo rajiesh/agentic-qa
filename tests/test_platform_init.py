@@ -168,3 +168,9 @@ def test_generate_yaml_name_quoting():
     yaml = generate_platform_yaml("my platform: demo", [], [])
     # Name with special chars should be quoted
     assert '"my platform: demo"' in yaml
+
+
+def test_generate_yaml_has_commented_subsystems_scaffold():
+    yaml = generate_platform_yaml("demo", [], [])
+    assert "# subsystems:" in yaml
+    assert "#     services: [service-a, service-b]" in yaml

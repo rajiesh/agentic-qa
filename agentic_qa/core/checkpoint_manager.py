@@ -105,6 +105,18 @@ class CheckpointManager:
             token_usage=token_usage or {},
         )
 
+    def mark_docs_resolved(
+        self, checkpoint: PlatformCheckpoint, doc_cache: dict[str, str]
+    ) -> None:
+        """Merge newly-fetched doc text into the checkpoint cache.
+
+        Fetch errors (an "[error] ..." string) are skipped so they are retried
+        on the next --resume rather than being cached permanently.
+        """
+        for url, text in doc_cache.items():
+            if not text.startswith("[error]"):
+                checkpoint.doc_cache[url] = text
+
     def mark_architecture_complete(
         self, checkpoint: PlatformCheckpoint, arch_json: str
     ) -> None:

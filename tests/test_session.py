@@ -32,6 +32,7 @@ def test_session_state_defaults():
     state = SessionState()
     assert state.repos == []
     assert state.doc_links == []
+    assert state.repo_doc_links == {}
     assert state.config_overrides == {}
     assert state.qa_runs == []
     assert state.platform_run is None
@@ -101,6 +102,7 @@ def test_slash_clear_resets_state_keeps_history():
     state = _make_state(
         repos=["https://github.com/x/y"],
         doc_links=["https://docs.example.com"],
+        repo_doc_links={"https://github.com/x/y": ["https://docs.example.com/y"]},
         config_overrides={"security": False},
         conversation_history=[{"role": "user", "content": "hello"}],
     )
@@ -108,6 +110,7 @@ def test_slash_clear_resets_state_keeps_history():
     assert result is False
     assert state.repos == []
     assert state.doc_links == []
+    assert state.repo_doc_links == {}
     assert state.config_overrides == {}
     # conversation_history is preserved by /clear
     assert len(state.conversation_history) == 1
@@ -196,6 +199,25 @@ async def test_tool_add_docs(agent_factory):
 
 
 @pytest.mark.asyncio
+async def test_tool_add_docs_scoped_to_repo_requires_repo_present(agent_factory):
+    agent = agent_factory()
+    result = await agent._tool_add_docs(["https://docs.example.com"], repo_url="https://github.com/foo/bar")
+    assert "[error]" in result
+    assert agent.state.repo_doc_links == {}
+
+
+@pytest.mark.asyncio
+async def test_tool_add_docs_scoped_to_repo_success(agent_factory):
+    state = SessionState(repos=["https://github.com/foo/bar"])
+    agent = agent_factory(state=state)
+    result = await agent._tool_add_docs(["https://docs.example.com"], repo_url="https://github.com/foo/bar")
+    assert "scoped" in result.lower()
+    assert agent.state.repo_doc_links["https://github.com/foo/bar"] == ["https://docs.example.com"]
+    # session-wide list is untouched
+    assert agent.state.doc_links == []
+
+
+@pytest.mark.asyncio
 async def test_tool_configure_disable(agent_factory):
     agent = agent_factory()
     result = await agent._tool_configure("security", False)
@@ -223,6 +245,56 @@ async def test_tool_run_analyze_no_repos(agent_factory):
     agent = agent_factory()
     result = await agent._tool_run_analyze()
     assert "[error]" in result or "no repositories" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_tool_run_plan_merges_session_and_repo_scoped_docs(agent_factory):
+    repo = "https://github.com/foo/bar"
+    state = SessionState(
+        repos=[repo],
+        doc_links=["https://docs.example.com/session-wide"],
+        repo_doc_links={repo: ["https://docs.example.com/repo-scoped"]},
+    )
+    agent = agent_factory(state=state)
+
+    with patch("agentic_qa.agents.session_agent.QAOrchestrator") as MockOrchestrator:
+        mock_instance = MockOrchestrator.return_value
+        mock_instance.run = AsyncMock(return_value=[])
+        await agent._tool_run_plan()
+
+    call_args = mock_instance.run.call_args
+    targets = call_args.args[0] if call_args.args else call_args.kwargs["targets"]
+    assert len(targets) == 1
+    assert set(targets[0].doc_links) == {
+        "https://docs.example.com/session-wide",
+        "https://docs.example.com/repo-scoped",
+    }
+
+
+@pytest.mark.asyncio
+async def test_tool_run_platform_plan_ignores_session_docs_with_note(agent_factory):
+    from agentic_qa.core.models import PlatformDescriptor
+
+    state = SessionState(doc_links=["https://docs.example.com/session"])
+    agent = agent_factory(state=state)
+    mock_console = MagicMock()
+    agent.console = mock_console  # spy on prints instead of discarding them
+
+    fake_descriptor = PlatformDescriptor(platform_name="demo", services=[], system_docs=[], subsystems=[])
+    fake_run = MagicMock()
+    fake_run.platform_plan = None
+
+    with patch("agentic_qa.core.platform_config.load_platform", return_value=fake_descriptor), \
+         patch("agentic_qa.agents.session_agent.PlatformOrchestrator") as MockOrchestrator, \
+         patch("pathlib.Path.exists", return_value=True):
+        MockOrchestrator.return_value.run = AsyncMock(return_value=fake_run)
+        await agent._tool_run_platform_plan("platform.yaml")
+
+    printed = " ".join(str(c) for c in mock_console.print.call_args_list)
+    assert "session doc links are not applied" in printed
+    # descriptor's own docs are what get passed through, not the session's
+    call_kwargs = MockOrchestrator.return_value.run.call_args.kwargs
+    assert call_kwargs["system_docs"] == []
 
 
 @pytest.mark.asyncio

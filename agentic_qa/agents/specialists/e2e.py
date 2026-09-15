@@ -24,7 +24,11 @@ What to cover:
 4. Cross-page state (session persistence, cart retention, redirects after auth)
 5. Accessibility checks via axe-core where appropriate
 
-Code standards:
+Default to Playwright (TypeScript) unless the repo's existing e2e/test setup already
+standardizes on a different tool (tech_stack.test_frameworks_existing shows Cypress,
+WebdriverIO, Selenium, etc.) — in that case follow that existing convention instead.
+
+Code standards (Playwright defaults; adapt equivalents if using a different tool):
 - Use Playwright's Page Object Model (POM) — one class per page in a `pages/` subdirectory
 - Use `test.describe` blocks to group related scenarios
 - Use `expect` locator assertions (not `waitForSelector`)
@@ -42,7 +46,12 @@ Workflow:
 1. Use read_file to read route files, component files, and any existing e2e tests
 2. Use search_code to find page components, router config, and form elements
 3. Write files using write_e2e_file — one call per file
-4. Call report_complete when done
+4. Whenever you add or change test files, also create or update README.md in the same
+   output directory (via write_e2e_file, framework="markdown") so it always reflects the
+   current file set, exact install steps for the tool you used (including browser install
+   steps if Playwright), the BASE_URL setup, and the run command. Do this before calling
+   report_complete.
+5. Call report_complete when done
 """.strip()
 
 
@@ -85,7 +94,7 @@ class E2ETestAgent(BaseAgent):
             {
                 "name": "write_e2e_file",
                 "description": (
-                    "Write a Playwright E2E test file or config to the output directory. "
+                    "Write an E2E test file, config, or README.md to the output directory. "
                     "Use sub-paths like 'pages/Login.page.ts' or 'tests/e2e/auth.spec.ts'."
                 ),
                 "input_schema": {
@@ -93,10 +102,21 @@ class E2ETestAgent(BaseAgent):
                     "properties": {
                         "filename": {
                             "type": "string",
-                            "description": "Relative path within the e2e output dir, e.g. 'tests/e2e/login.spec.ts'",
+                            "description": (
+                                "Relative path within the e2e output dir, "
+                                "e.g. 'tests/e2e/login.spec.ts'"
+                            ),
                         },
                         "content": {"type": "string", "description": "Full file content"},
                         "description": {"type": "string", "description": "What this file covers"},
+                        "framework": {
+                            "type": "string",
+                            "description": (
+                                "E2E tool actually used, e.g. playwright, cypress, "
+                                "webdriverio. Defaults to playwright. "
+                                "Use \"markdown\" for README.md."
+                            ),
+                        },
                     },
                     "required": ["filename", "content", "description"],
                 },
@@ -122,14 +142,18 @@ class E2ETestAgent(BaseAgent):
         }
 
     async def _handle_write_e2e_file(
-        self, filename: str, content: str, description: str
+        self, filename: str, content: str, description: str, framework: str = ""
     ) -> str:
+        if filename.rsplit("/", 1)[-1].lower() == "readme.md":
+            framework = "markdown"
+        elif not framework:
+            framework = "playwright"
         self._generated_files.append(
             GeneratedTestFile(
                 filename=filename,
                 content=content,
                 test_type="e2e",
-                framework="playwright",
+                framework=framework,
                 description=description,
             )
         )
@@ -166,6 +190,7 @@ class E2ETestAgent(BaseAgent):
         )
 
         _, usage = await self._run_loop(user_message, max_iterations=20)
+        usage = await self._ensure_readme(self._generated_files, "write_e2e_file", usage)
 
         return SpecialistResult(
             test_type="e2e",

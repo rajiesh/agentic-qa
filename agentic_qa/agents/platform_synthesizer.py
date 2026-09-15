@@ -61,9 +61,14 @@ Call emit_platform_architecture once with the complete list of discovered contra
 """
 
 
-def _summaries_to_message(summaries: list[ServiceSummary]) -> str:
+def _summaries_to_message(summaries: list[ServiceSummary], doc_text: str = "") -> str:
     """Render all summaries into a single structured user message."""
-    lines = ["Here are the service summaries:\n"]
+    lines: list[str] = []
+    if doc_text:
+        lines.append("## Platform documentation (system-wide + subsystem-scoped)\n")
+        lines.append(doc_text)
+        lines.append("")
+    lines.append("Here are the service summaries:\n")
     for s in summaries:
         lines.append(f"## Service: {s.name} (role={s.role})")
         if s.tech_stack_hint:
@@ -227,6 +232,7 @@ class PlatformSynthesizerAgent(BaseAgent):
         self,
         summaries: list[ServiceSummary],
         platform_name: str = "",
+        doc_text: str = "",
         **_kwargs: Any,
     ) -> PlatformArchitecture:
         """
@@ -238,6 +244,11 @@ class PlatformSynthesizerAgent(BaseAgent):
             One ServiceSummary per service (output of ServiceScannerAgent.run).
         platform_name:
             Optional label used only for logging.
+        doc_text:
+            Pre-fetched system-wide + subsystem-scoped documentation content
+            (resolved centrally by doc_resolver.resolve_platform_docs). Per-service
+            doc_links are intentionally NOT included here — they stay scoped to
+            that service's own ServiceScannerAgent.
 
         Returns
         -------
@@ -250,7 +261,7 @@ class PlatformSynthesizerAgent(BaseAgent):
             len(summaries),
         )
 
-        user_msg = _summaries_to_message(summaries)
+        user_msg = _summaries_to_message(summaries, doc_text=doc_text)
         max_iters = getattr(self.config, "synthesizer_max_iterations", 8)
         _text, usage = await self._run_loop(user_msg, max_iterations=max_iters)
 
