@@ -353,3 +353,34 @@ def test_make_plan_config_disables_all(agent_factory):
 
         for t in ["functional", "performance", "security", "integration", "api", "e2e", "contract"]:
             assert getattr(mock_cfg.specialists, t).enabled is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool", "inputs", "expected_resume"),
+    [
+        ("run_platform_plan", {"platform_yaml": "platform.yaml"}, True),
+        ("run_platform_plan", {"platform_yaml": "platform.yaml", "fresh_start": True}, False),
+        ("run_platform_analyze", {"platform_yaml": "platform.yaml"}, True),
+        ("run_platform_analyze", {"platform_yaml": "platform.yaml", "fresh_start": True}, False),
+    ],
+)
+async def test_platform_tools_fresh_start_controls_resume(
+    agent_factory, tool, inputs, expected_resume
+):
+    from agentic_qa.core.models import PlatformDescriptor
+
+    agent = agent_factory()
+    fake_descriptor = PlatformDescriptor(platform_name="demo", services=[], system_docs=[], subsystems=[])
+    fake_run = MagicMock()
+    fake_run.platform_plan = None
+    fake_run.service_runs = {}
+    fake_run.contract_results = []
+
+    with patch("agentic_qa.core.platform_config.load_platform", return_value=fake_descriptor), \
+         patch("agentic_qa.agents.session_agent.PlatformOrchestrator") as MockOrchestrator, \
+         patch("pathlib.Path.exists", return_value=True):
+        MockOrchestrator.return_value.run = AsyncMock(return_value=fake_run)
+        await agent._dispatch_tool(tool, inputs)
+
+    assert MockOrchestrator.return_value.run.call_args.kwargs["resume"] is expected_resume

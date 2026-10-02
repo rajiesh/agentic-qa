@@ -11,7 +11,6 @@ dependencies = [
     "anthropic>=0.40.0",
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
-    "typer[all]>=0.12",
     "rich>=13.7",
     "httpx>=0.27",
     "aiofiles>=24.1",
@@ -20,7 +19,7 @@ dependencies = [
 ]
 
 [project.scripts]
-agentic-qa = "agentic_qa.cli:app"
+agentic-qa = "agentic_qa.__main__:main"
 
 [project.optional-dependencies]
 contract = [

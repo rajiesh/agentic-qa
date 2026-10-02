@@ -166,7 +166,15 @@ SESSION_TOOLS: list[dict[str, Any]] = [
                 "platform_yaml": {
                     "type": "string",
                     "description": "Path to the platform.yaml descriptor file",
-                }
+                },
+                "fresh_start": {
+                    "type": "boolean",
+                    "description": (
+                        "Ignore any saved checkpoint and start the platform run from scratch. "
+                        "Default false (resume from checkpoint). Only set when the user asks "
+                        "for a fresh / clean run."
+                    ),
+                },
             },
             "required": ["platform_yaml"],
         },
@@ -188,6 +196,14 @@ SESSION_TOOLS: list[dict[str, Any]] = [
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Test types to skip",
+                },
+                "fresh_start": {
+                    "type": "boolean",
+                    "description": (
+                        "Ignore any saved checkpoint and start the platform run from scratch. "
+                        "Default false (resume from checkpoint). Only set when the user asks "
+                        "for a fresh / clean run."
+                    ),
                 },
             },
             "required": ["platform_yaml"],
@@ -224,6 +240,8 @@ Guidelines:
 - When the user says "plan", "preview", "show me what", call run_plan.
 - When the user says "analyze", "generate", "go ahead", "run it", call run_analyze.
 - When the user says "skip security" or "no e2e", call configure before running.
+- Platform runs resume from their checkpoint; pass fresh_start=true only if the user asks
+  to start over / ignore previous progress.
 - After each tool call, briefly summarize the result and offer clear next steps.
 - Be concise. The user sees live orchestrator output; don't repeat it verbatim.
 - Only report facts from tool results. Never fabricate test counts or file names.
@@ -361,10 +379,12 @@ class SessionAgent:
                 inputs.get("repos"), inputs.get("skip_types", [])
             ),
             "run_platform_plan": lambda: self._tool_run_platform_plan(
-                inputs["platform_yaml"]
+                inputs["platform_yaml"], inputs.get("fresh_start", False)
             ),
             "run_platform_analyze": lambda: self._tool_run_platform_analyze(
-                inputs["platform_yaml"], inputs.get("skip_types", [])
+                inputs["platform_yaml"],
+                inputs.get("skip_types", []),
+                inputs.get("fresh_start", False),
             ),
             "show_state": lambda: self._tool_show_state(),
             "exit_session": lambda: self._tool_exit_session(),
@@ -498,7 +518,7 @@ class SessionAgent:
 
         return "\n".join(lines)
 
-    async def _tool_run_platform_plan(self, platform_yaml: str) -> str:
+    async def _tool_run_platform_plan(self, platform_yaml: str, fresh_start: bool = False) -> str:
         from pathlib import Path
 
         from ..core.platform_config import load_platform
@@ -530,6 +550,7 @@ class SessionAgent:
             subsystems=descriptor.subsystems,
             run_per_service=False,
             run_contracts=False,
+            resume=not fresh_start,
         )
         self.state.platform_run = run
 
@@ -550,7 +571,10 @@ class SessionAgent:
         return "\n".join(lines)
 
     async def _tool_run_platform_analyze(
-        self, platform_yaml: str, skip_types: list[str] | None = None
+        self,
+        platform_yaml: str,
+        skip_types: list[str] | None = None,
+        fresh_start: bool = False,
     ) -> str:
         from pathlib import Path
 
@@ -583,6 +607,7 @@ class SessionAgent:
             subsystems=descriptor.subsystems,
             run_per_service=True,
             run_contracts=True,
+            resume=not fresh_start,
         )
         self.state.platform_run = run
 
