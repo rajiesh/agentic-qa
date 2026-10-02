@@ -131,6 +131,8 @@ You › Run the full platform analysis for platform.yaml
 
 Runs per-service functional/performance/security/E2E tests **and** Pact contract tests for every discovered contract. Output lands in `outputs/<platform-name>/<run-id>/`. Ask the session to skip test types (e.g. "skip contract tests") before running.
 
+Platform runs resume from their last checkpoint. Say "start the platform run fresh" to ignore saved progress.
+
 ### Monorepo variant
 
 If multiple services live in one repo, use the `repos:` shape:
@@ -147,6 +149,21 @@ repos:
         path: apps/web
         role: frontend
 ```
+
+## Configuration
+
+There are no command-line flags (apart from `-v` for debug logs). Runtime settings come from environment variables or `.env`:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | *(required)* | Claude API key |
+| `COST_BUDGET_USD` | unlimited | Abort a run once this USD spend is exceeded |
+| `OUTPUT_DIR` | `outputs` | Where generated tests are written |
+| `LINT_GENERATED` | `true` | Run ruff / eslint on generated files |
+| `CONCURRENCY_LIMIT` | `3` | Parallel specialists per repo |
+| `REPO_CONCURRENCY_LIMIT` | `5` | Parallel repos / services |
+
+Test types are toggled conversationally ("skip security", "enable API tests").
 
 ## Run agentic-qa's own tests
 

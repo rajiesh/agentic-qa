@@ -257,7 +257,8 @@ repos:
 # tests/test_cost_tracker.py    — CostTracker accumulation, budget enforcement, BaseAgent integration
 # tests/test_phase5.py          — ServiceScannerAgent, PlatformSynthesizerAgent, ServiceSummary
 # tests/test_validator.py       — PostGenerationValidator ruff/eslint
-# tests/test_session.py         — InteractiveSession, SessionState
+# tests/test_session.py         — InteractiveSession, SessionState, session tools (incl. fresh_start)
+# tests/test_main.py            — entry point: --help, rejects subcommands, missing key, log levels
 # tests/test_platform.py        — PlatformOrchestrator flow
 # tests/test_repo_ingestor.py   — RepoIngestor clone logic
 ```
@@ -284,7 +285,7 @@ repos:
 
 ### Resilience
 - **Exponential backoff**: `base × 2^attempt`, capped at `retry_max_wait_secs`; handles `RateLimitError` and `APIStatusError`; single code path in `BaseAgent._run_loop`, all agents benefit automatically
-- **Checkpointing**: `PlatformCheckpoint` written atomically (`.tmp` → `os.replace`) after every significant phase; `reset_crashed_states()` detects "running" → "pending" on resume; session platform runs always resume (`PlatformOrchestrator.run(resume=False)` starts fresh)
+- **Checkpointing**: `PlatformCheckpoint` written atomically (`.tmp` → `os.replace`) after every significant phase; `reset_crashed_states()` detects "running" → "pending" on resume; session platform tools resume by default; `fresh_start=true` on `run_platform_plan` / `run_platform_analyze` passes `resume=False` (deletes the checkpoint and starts fresh)
 - **Scanner resume**: completed `ServiceScannerAgent` results cached in `checkpoint.scan_results` — re-scans skipped on resume
 
 ---

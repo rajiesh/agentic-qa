@@ -24,6 +24,11 @@ def _setup_logging(verbose: bool) -> None:
         level=level,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
+    # Keep agentic_qa's INFO progress logs, but don't let per-request HTTP chatter
+    # from third-party clients clutter the REPL unless --verbose is set.
+    if not verbose:
+        for name in ("httpx", "httpx2", "httpcore", "anthropic"):
+            logging.getLogger(name).setLevel(logging.WARNING)
 
 
 def main(argv: list[str] | None = None) -> int:
