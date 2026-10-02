@@ -11,7 +11,7 @@ then Specialist Agents generate runnable test code (pytest, Locust, ZAP configs,
 ### Single-repo path
 
 ```
-CLI: analyze / plan
+Session tools: run_plan / run_analyze
   └─► QAOrchestrator           (agentic_qa/orchestrator.py)
         └─► CostTracker               — shared USD budget across all agents in this batch
         └─► asyncio.Semaphore(repo_concurrency_limit=5)   — outer repo parallelism gate
@@ -34,7 +34,7 @@ CLI: analyze / plan
 ### Multi-repo / platform path
 
 ```
-CLI: analyze-platform / plan-platform / init-platform
+Session tools: run_platform_plan / run_platform_analyze
   └─► PlatformOrchestrator     (agentic_qa/platform_orchestrator.py)
         └─► CheckpointManager         (agentic_qa/core/checkpoint_manager.py)
         │     — load/save PlatformCheckpoint atomically (os.replace .tmp → .json)
@@ -78,10 +78,10 @@ CLI: analyze-platform / plan-platform / init-platform
 Platform descriptor: `platform.yaml` parsed by `agentic_qa/core/platform_config.py`.
 Supports **multi-repo** (`services:` list) and **monorepo** (`repos:` with nested `services:`).
 
-### Interactive session (no subcommand)
+### Interactive session (the only user interface)
 
 ```
-agentic-qa          (no arguments)
+agentic-qa  /  python -m agentic_qa   (agentic_qa/__main__.py; only flag: -v/--verbose)
   └─► InteractiveSession  (agentic_qa/session.py)
         └─► SessionAgent  (agentic_qa/agents/session_agent.py)
               — conversational REPL: add repos, ask for plans or full analysis
@@ -108,7 +108,7 @@ Every agent (`StrategistAgent`, `ServiceScannerAgent`, `PlatformSynthesizerAgent
 
 | File | Role |
 |---|---|
-| `agentic_qa/cli.py` | Typer CLI: `analyze`, `plan`, `init-platform`, `analyze-platform`, `plan-platform`; bare invocation → interactive session |
+| `agentic_qa/__main__.py` | Entry point (`agentic-qa` script): loads `QAConfig`, launches the interactive session |
 | `agentic_qa/session.py` | `InteractiveSession` + `SessionState` — REPL loop and session memory |
 | `agentic_qa/config.py` | `QAConfig` (BaseSettings), `RepoTarget`, `SpecialistConfig`, `TestTypeConfig` |
 | `agentic_qa/orchestrator.py` | Single-repo coordinator: clone → strategist → fan-out → validate |
@@ -136,7 +136,6 @@ Every agent (`StrategistAgent`, `ServiceScannerAgent`, `PlatformSynthesizerAgent
 | `agentic_qa/core/validator.py` | `PostGenerationValidator`: file-creation check + ruff (Python) / eslint (JS/TS) lint |
 | `agentic_qa/core/repo_ingestor.py` | git clone / sparse-checkout, size cap (`max_repo_size_mb`) |
 | `agentic_qa/core/platform_config.py` | Parse `platform.yaml` → `list[ServiceDescriptor]`; supports multi-repo and monorepo shapes |
-| `agentic_qa/core/platform_init.py` | `detect_role(path)` heuristics; `generate_platform_yaml(...)` for `init-platform` command |
 | **Tools** | |
 | `agentic_qa/tools/repo_tools.py` | `async_read_file(path, offset=0, max_lines=300)` with pagination hint; `async_list_directory`; `async_search_code` (ripgrep preferred) |
 | `agentic_qa/tools/web_tools.py` | `async_fetch_url` — httpx; used for doc links and OpenAPI specs |
@@ -194,46 +193,27 @@ uv pip install -e ".[contract]"   # adds pact-python
 
 ---
 
-## CLI usage
+## Usage
+
+agentic-qa has no subcommands — everything runs through the interactive session.
 
 ```bash
-# ── Interactive session (no subcommand) ──────────────────────────────────────
-.venv/bin/agentic-qa
-# Launches conversational REPL — add repos, ask for plans or analyses
-# Slash commands: /repos  /runs  /config  /clear  /help
-
-# ── Single repo ──────────────────────────────────────────────────────────────
-.venv/bin/agentic-qa analyze <repo-url> [<repo-url>...] [--doc <url>]
-  --concurrency 3        # parallel specialists per repo (default 3)
-  --repo-concurrency 5   # parallel repos (default 5)
-  --budget 5.00          # USD cost cap (aborts with BudgetExceededError if exceeded)
-  --no-security          # disable security tests
-  --no-perf              # disable performance tests
-  --no-e2e               # disable Playwright E2E tests
-  --no-lint              # skip ruff/eslint on generated files
-  --integration          # enable integration tests (disabled by default)
-  --api                  # enable API-specific tests (disabled by default)
-  --run-tests            # execute generated tests after creation
-
-.venv/bin/agentic-qa plan <repo-url>   # dry run — strategist only, no code generated
-
-# ── Platform / multi-repo ────────────────────────────────────────────────────
-.venv/bin/agentic-qa init-platform <repo-url>... [--name my-platform] [--output platform.yaml]
-# Auto-detects service roles (frontend/backend/infra) → generates platform.yaml
-
-.venv/bin/agentic-qa analyze-platform platform.yaml
-  --budget 20.00             # USD cap for the entire platform run
-  --resume / --no-resume     # resume from last checkpoint (default: --resume)
-  --scanner-concurrency 10   # parallel service scanners (default 10)
-  --repo-concurrency 5       # parallel per-service QA runs (default 5)
-  --concurrency 3            # parallel specialists within each service
-  --no-contract              # skip Pact contract test generation
-  --no-per-service           # skip per-service test generation (contracts only)
-  --no-security --no-perf --no-e2e --no-lint --integration --api
-
-.venv/bin/agentic-qa plan-platform platform.yaml [--resume/--no-resume]
-# Dry run — discovers architecture + contracts only, no code generated
+.venv/bin/agentic-qa          # or: .venv/bin/python -m agentic_qa  (-v for debug logs)
 ```
+
+Ask in plain language; the SessionAgent maps requests onto its tools:
+
+| Ask for… | Session tool |
+|---|---|
+| "add <repo-url or path>", "docs are at <url>" | `add_repos`, `add_docs` |
+| "skip security", "enable api tests" | `configure` (functional/performance/security/e2e/integration/api/contract) |
+| "show me the plan" | `run_plan` — strategist only, no code generated |
+| "generate the tests" | `run_analyze` |
+| "plan the platform in platform.yaml" | `run_platform_plan` — architecture + contracts only |
+| "analyze the platform in platform.yaml" | `run_platform_analyze` — per-service + contract tests |
+
+Slash commands (handled locally, no API call): `/repos /docs /config /runs /clear /reset /help /exit`.
+Runtime knobs (budget, concurrency, lint) come from `QAConfig` env vars, e.g. `COST_BUDGET_USD=5`.
 
 Example `platform.yaml`:
 ```yaml
@@ -279,7 +259,6 @@ repos:
 # tests/test_validator.py       — PostGenerationValidator ruff/eslint
 # tests/test_session.py         — InteractiveSession, SessionState
 # tests/test_platform.py        — PlatformOrchestrator flow
-# tests/test_platform_init.py   — detect_role heuristics
 # tests/test_repo_ingestor.py   — RepoIngestor clone logic
 ```
 
@@ -305,11 +284,8 @@ repos:
 
 ### Resilience
 - **Exponential backoff**: `base × 2^attempt`, capped at `retry_max_wait_secs`; handles `RateLimitError` and `APIStatusError`; single code path in `BaseAgent._run_loop`, all agents benefit automatically
-- **Checkpointing**: `PlatformCheckpoint` written atomically (`.tmp` → `os.replace`) after every significant phase; `reset_crashed_states()` detects "running" → "pending" on resume; `--no-resume` deletes checkpoint and starts fresh
+- **Checkpointing**: `PlatformCheckpoint` written atomically (`.tmp` → `os.replace`) after every significant phase; `reset_crashed_states()` detects "running" → "pending" on resume; session platform runs always resume (`PlatformOrchestrator.run(resume=False)` starts fresh)
 - **Scanner resume**: completed `ServiceScannerAgent` results cached in `checkpoint.scan_results` — re-scans skipped on resume
-
-### Role detection (init-platform)
-- `detect_role(path)` heuristics: infra dirs (terraform/k8s) → `infra`; `package.json` with React/Vue/Next.js dep or `pages/public` dirs → `frontend`; any Python/Go/Java/Rust build file → `backend`; default → `backend`
 
 ---
 
@@ -332,9 +308,10 @@ bash deploy.sh --stop # stop API + web server (postgres data volume kept)
 URLs when running: UI → http://localhost:3000 · API → http://localhost:8000 · Docs → http://localhost:8000/docs
 
 ```bash
-# Test against the todo-app:
-.venv/bin/agentic-qa plan todo-app/backend            # single-service dry run
-.venv/bin/agentic-qa analyze todo-app/backend         # full single-repo test gen
-.venv/bin/agentic-qa plan-platform todo-platform.yaml # platform dry run (discovers contracts)
-.venv/bin/agentic-qa analyze-platform todo-platform.yaml --budget 5.00
+# Test against the todo-app (from the repo root):
+COST_BUDGET_USD=5 .venv/bin/agentic-qa
+You › Add todo-app/backend and show me the test plan          # single-service dry run
+You › Generate the tests                                      # full single-repo test gen
+You › Plan the platform in todo-platform.yaml                 # platform dry run (discovers contracts)
+You › Run the full platform analysis for todo-platform.yaml
 ```
